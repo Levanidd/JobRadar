@@ -1,4 +1,4 @@
-import { AutoRunSettings, RunLog } from "./AutoRun"
+import { AutoRunSettings, ModelUsageLog, RunLog } from "./AutoRun"
 import { ModelPicker } from "./ModelPicker"
 import { ProfilePromptEditor } from "./ProfilePrompt"
 import { Users } from "./Users"
@@ -19,6 +19,7 @@ export function Settings() {
           <Heading>Автозапуск</Heading>
           <AutoRunSettings />
           <RunLog />
+          <ModelUsageLog />
           <Heading>Пользователи</Heading>
         </>
       }

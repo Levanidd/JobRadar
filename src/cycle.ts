@@ -1,6 +1,7 @@
 import { message } from "./errors"
 import { notifyNew, pickSources, prefilterAndScore, runSourceStep, type SourcePolicy } from "./ingest"
 import type { Bindings, SourceRow } from "./types"
+import type { UsageContext } from "./usage"
 
 const SCORE_CHUNK = 30
 const MAX_HOPS = 1000
@@ -225,6 +226,17 @@ async function finish(env: Bindings, notified: number): Promise<boolean> {
   return false
 }
 
+/** Only the scheduled run's own user is "auto"; anyone who queued up behind it clicked the button. */
+async function cycleUsage(env: Bindings, runId: number | null, userId: number): Promise<UsageContext> {
+  const run = runId
+    ? await env.DB.prepare(`SELECT kind, user_id FROM cycle_runs WHERE id = ?`)
+        .bind(runId)
+        .first<{ kind: CycleKind; user_id: number | null }>()
+    : null
+  const trigger = run?.kind === "auto" && run.user_id === userId ? "auto" : "manual"
+  return { kind: "cycle", userId, trigger, runId }
+}
+
 async function advance(env: Bindings, row: CycleRow): Promise<boolean> {
   if (row.phase === "sources") {
     const item = planned(row.source_ids)[row.cursor]
@@ -276,7 +288,9 @@ async function advance(env: Bindings, row: CycleRow): Promise<boolean> {
 
   if (row.phase === "scoring") {
     const userId = row.user_id
-    const step = userId ? await prefilterAndScore(env, userId, SCORE_CHUNK) : { scored: 0, remaining: 0, more: false }
+    const step = userId
+      ? await prefilterAndScore(env, userId, SCORE_CHUNK, await cycleUsage(env, row.run_id, userId))
+      : { scored: 0, remaining: 0, more: false }
     const scored = row.scored + step.scored
     if (step.more) {
       await env.DB.prepare(

@@ -10,6 +10,8 @@ import type {
   InterviewStage,
   Job,
   JobStatus,
+  ModelBatchDetail,
+  ModelBatchLog,
   ModelOption,
   RunResult,
   BlacklistedCompany,
@@ -364,6 +366,14 @@ export const api = {
 
   runLog(page: number): Promise<CycleRunLog> {
     return request(`/run/log?page=${page}`)
+  },
+
+  modelBatches(page: number): Promise<ModelBatchLog> {
+    return request(`/model/batches?page=${page}`)
+  },
+
+  modelBatch(id: number): Promise<ModelBatchDetail> {
+    return request(`/model/batches/${id}`)
   },
 
   detect(url: string): Promise<DetectResult> {

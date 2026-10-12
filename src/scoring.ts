@@ -23,10 +23,25 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
 /** Scoring is classification, not reasoning — deeper thinking mostly buys output tokens. */
 export const DEFAULT_THINKING_LEVEL: ThinkingLevel = "LOW"
 
+/** One request to the model, as it is written to the usage log. */
+export type ModelCall = {
+  model: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  jobs: number
+  input_tokens: number
+  output_tokens: number
+  thought_tokens: number
+  ok: boolean
+  error: string | null
+}
+
 export type ScoringConfig = {
   apiKey?: string
   model?: string
   thinkingLevel?: ThinkingLevel
+  onCall?: (call: ModelCall) => void
 }
 
 export function isThinkingLevel(value: string): value is ThinkingLevel {
@@ -134,6 +149,11 @@ export function localScore(job: ScoreInput): ScoreOutput {
 
 type GeminiResponse = {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    thoughtsTokenCount?: number
+  }
 }
 
 function renderJobs(jobs: ScoreInput[]): string {
@@ -204,6 +224,43 @@ async function generate(
   return (await res.json()) as GeminiResponse
 }
 
+/** Thinking is billed as output, so it is counted there and also kept apart for the breakdown. */
+async function tracedGenerate(
+  apiKey: string,
+  model: string,
+  payload: Record<string, unknown>,
+  jobs: number,
+  onCall?: (call: ModelCall) => void,
+): Promise<GeminiResponse> {
+  const started = Date.now()
+  const report = (body: GeminiResponse | null, error: unknown) => {
+    if (!onCall) return
+    const finished = Date.now()
+    const usage = body?.usageMetadata
+    const thoughts = usage?.thoughtsTokenCount ?? 0
+    onCall({
+      model,
+      started_at: new Date(started).toISOString(),
+      finished_at: new Date(finished).toISOString(),
+      duration_ms: finished - started,
+      jobs,
+      input_tokens: usage?.promptTokenCount ?? 0,
+      output_tokens: (usage?.candidatesTokenCount ?? 0) + thoughts,
+      thought_tokens: thoughts,
+      ok: !error,
+      error: error ? (error instanceof Error ? error.message : String(error)).slice(0, 300) : null,
+    })
+  }
+  try {
+    const body = await generate(apiKey, model, payload)
+    report(body, null)
+    return body
+  } catch (error) {
+    report(null, error)
+    throw error
+  }
+}
+
 export type ModelOption = { id: string; label: string }
 
 const MODEL_ALIASES = new Set(["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest"])
@@ -239,11 +296,18 @@ export async function validateModel(
   apiKey: string,
   model: string,
   thinkingLevel: ThinkingLevel,
+  onCall?: (call: ModelCall) => void,
 ): Promise<void> {
-  await generate(apiKey, model, {
-    contents: [{ role: "user", parts: [{ text: "ping" }] }],
-    generationConfig: { temperature: 0, thinkingConfig: { thinkingLevel } },
-  })
+  await tracedGenerate(
+    apiKey,
+    model,
+    {
+      contents: [{ role: "user", parts: [{ text: "ping" }] }],
+      generationConfig: { temperature: 0, thinkingConfig: { thinkingLevel } },
+    },
+    0,
+    onCall,
+  )
 }
 
 export async function scoreJobs(
@@ -255,16 +319,22 @@ export async function scoreJobs(
   if (jobs.length === 0) return []
 
   const model = config.model?.trim() || DEFAULT_MODEL
-  const body = await generate(config.apiKey, model, {
-    systemInstruction: { parts: [{ text: scoringSystemPrompt(profile) }] },
-    contents: [{ role: "user", parts: [{ text: renderJobs(jobs) }] }],
-    generationConfig: {
-      temperature: 0,
-      responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
-      thinkingConfig: { thinkingLevel: config.thinkingLevel ?? DEFAULT_THINKING_LEVEL },
+  const body = await tracedGenerate(
+    config.apiKey,
+    model,
+    {
+      systemInstruction: { parts: [{ text: scoringSystemPrompt(profile) }] },
+      contents: [{ role: "user", parts: [{ text: renderJobs(jobs) }] }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json",
+        responseSchema: RESPONSE_SCHEMA,
+        thinkingConfig: { thinkingLevel: config.thinkingLevel ?? DEFAULT_THINKING_LEVEL },
+      },
     },
-  })
+    jobs.length,
+    config.onCall,
+  )
 
   const text = (body.candidates?.[0]?.content?.parts ?? [])
     .map((part) => part.text ?? "")

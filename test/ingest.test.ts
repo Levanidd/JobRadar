@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { prefilterAndScore, upsertJobs } from "../src/ingest"
 import type { RawJob, SourceRow } from "../src/types"
@@ -433,5 +433,77 @@ describe("prefilterAndScore", () => {
 
     expect(await prefilterAndScore(env, TEST_USER_ID)).toEqual({ scored: 0, remaining: 0, more: false })
     expect(await one(env, `SELECT score FROM user_jobs WHERE user_id = ?`, TEST_USER_ID)).toMatchObject({ score: null })
+  })
+})
+
+describe("model usage log", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function stubGemini() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { contents: Array<{ parts: Array<{ text: string }> }> }
+        const ids = [...body.contents[0].parts[0].text.matchAll(/external_id: (\S+)/g)].map((match) => match[1])
+        const scores = ids.map((id) => ({ external_id: id, score: 80, reason: "fit", flags: [] }))
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: JSON.stringify({ scores }) }] } }],
+            usageMetadata: { promptTokenCount: 1000, candidatesTokenCount: 120, thoughtsTokenCount: 30 },
+          }),
+        )
+      }),
+    )
+  }
+
+  it("writes each request with its tokens and folds a cycle's hops into one batch", async () => {
+    env = testEnv({ GEMINI_API_KEY: "key" })
+    stubGemini()
+    const source = await addSource()
+    await upsertJobs(
+      env,
+      source,
+      [
+        job({ externalId: "1", title: "Senior Product Manager", url: "https://acme.example/1" }),
+        job({ externalId: "2", title: "Group Product Manager", url: "https://acme.example/2" }),
+        job({ externalId: "3", title: "Head of Product", url: "https://acme.example/3" }),
+      ],
+      new Set(),
+    )
+    const run = await one<{ id: number }>(
+      env,
+      `INSERT INTO cycle_runs (kind, user_id) VALUES ('auto', ?) RETURNING id`,
+      TEST_USER_ID,
+    )
+    const usage = { kind: "cycle", userId: TEST_USER_ID, trigger: "auto", runId: run?.id } as const
+
+    await prefilterAndScore(env, TEST_USER_ID, 2, usage)
+    await prefilterAndScore(env, TEST_USER_ID, 2, usage)
+
+    const batches = await rows(env, `SELECT * FROM model_batches`)
+    expect(batches).toHaveLength(1)
+    expect(batches[0]).toMatchObject({
+      kind: "cycle",
+      trigger: "auto",
+      run_id: run?.id,
+      requests: 2,
+      jobs: 3,
+      input_tokens: 2000,
+      output_tokens: 300,
+    })
+    const requests = await rows(env, `SELECT jobs, input_tokens, output_tokens, thought_tokens, ok FROM model_requests`)
+    expect(requests).toEqual([
+      { jobs: 2, input_tokens: 1000, output_tokens: 150, thought_tokens: 30, ok: 1 },
+      { jobs: 1, input_tokens: 1000, output_tokens: 150, thought_tokens: 30, ok: 1 },
+    ])
+  })
+
+  it("keeps nothing when the pass had nothing to send", async () => {
+    env = testEnv({ GEMINI_API_KEY: "key" })
+    stubGemini()
+    await prefilterAndScore(env, TEST_USER_ID)
+    expect(await rows(env, `SELECT id FROM model_batches`)).toEqual([])
   })
 })

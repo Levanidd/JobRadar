@@ -233,6 +233,54 @@ export type CycleRunEntry = {
   scored: number
   error: string | null
   user_name: string | null
+  input_tokens: number
+  output_tokens: number
+}
+
+export type ModelBatchKind = "cycle" | "score" | "source" | "rescore" | "job" | "check"
+
+export type ModelBatch = {
+  id: number
+  kind: ModelBatchKind
+  run_id: number | null
+  trigger: "manual" | "auto"
+  model: string | null
+  started_at: string
+  finished_at: string
+  requests: number
+  jobs: number
+  failed: number
+  duration_ms: number
+  input_tokens: number
+  output_tokens: number
+  user_name: string | null
+  user_role: "master" | "user" | null
+}
+
+export type ModelBatchLog = {
+  batches: ModelBatch[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type ModelRequest = {
+  id: number
+  model: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  jobs: number
+  input_tokens: number
+  output_tokens: number
+  thought_tokens: number
+  ok: number
+  error: string | null
+}
+
+export type ModelBatchDetail = {
+  batch: ModelBatch
+  requests: ModelRequest[]
 }
 
 export type CycleRunLog = {

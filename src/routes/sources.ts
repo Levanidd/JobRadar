@@ -101,7 +101,8 @@ sources.post("/api/sources/:id/run", async (c) => {
   if (!source) return c.json({ error: "not found" }, 404)
   const run = await runSource(c.env, source)
   if (c.req.query("score") === "0") return c.json({ run, scored: 0 })
-  const { scored } = await prefilterAndScore(c.env, currentUser(c).id)
+  const userId = currentUser(c).id
+  const { scored } = await prefilterAndScore(c.env, userId, undefined, { kind: "source", userId, trigger: "manual" })
   return c.json({ run, scored })
 })
 

@@ -15,6 +15,7 @@ import {
   writeSetting,
 } from "../settings"
 import type { AppEnv, Bindings } from "../types"
+import { withUsage } from "../usage"
 import { loadUserProfile, saveUserBlacklist, saveUserContent, saveUserPrefilter } from "../users"
 
 export const profile = new Hono<AppEnv>()
@@ -72,7 +73,7 @@ export async function resetAndScore(env: Bindings, userId: number): Promise<{ ok
   )
     .bind(userId)
     .run()
-  const { scored } = await prefilterAndScore(env, userId)
+  const { scored } = await prefilterAndScore(env, userId, undefined, { kind: "rescore", userId, trigger: "manual" })
   return { ok: true, scored }
 }
 
@@ -137,8 +138,11 @@ profile.put("/api/settings", async (c) => {
     const level: ThinkingLevel = isThinkingLevel(thinking ?? "")
       ? (thinking as ThinkingLevel)
       : (await settingsView(c.env)).thinking_level
+    const apiKey = c.env.GEMINI_API_KEY
     try {
-      await validateModel(c.env.GEMINI_API_KEY, model, level)
+      await withUsage(c.env, { kind: "check", userId: currentUser(c).id, trigger: "manual" }, {}, (config) =>
+        validateModel(apiKey, model, level, config.onCall),
+      )
     } catch (error) {
       return c.json({ error: message(error) }, 400)
     }

@@ -1523,6 +1523,43 @@ a.mono:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.run-log tr.is-clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.run-log tr.is-clickable:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dialog.dialog-wide {
+  width: min(860px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.dialog-head {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-facts dt {
+  color: var(--text-secondary);
+}
+
+.batch-facts dd {
+  margin: 0;
+}
+
 .dialog-overlay {
   position: fixed;
   inset: 0;

@@ -76,7 +76,9 @@ run.get("/api/run/log", async (c) => {
   const [rows, count] = await Promise.all([
     c.env.DB.prepare(
       `SELECT r.id, r.kind, r.status, r.started_at, r.finished_at,
-         r.sources, r.found, r.fresh, r.failed, r.scored, r.error, u.name AS user_name
+         r.sources, r.found, r.fresh, r.failed, r.scored, r.error, u.name AS user_name,
+         COALESCE((SELECT SUM(b.input_tokens) FROM model_batches b WHERE b.run_id = r.id), 0) AS input_tokens,
+         COALESCE((SELECT SUM(b.output_tokens) FROM model_batches b WHERE b.run_id = r.id), 0) AS output_tokens
        FROM cycle_runs r
        LEFT JOIN users u ON u.id = r.user_id
        ORDER BY r.id DESC LIMIT ? OFFSET ?`,
@@ -86,6 +88,51 @@ run.get("/api/run/log", async (c) => {
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM cycle_runs`).first<{ n: number }>(),
   ])
   return c.json({ runs: rows.results, total: Number(count?.n ?? 0), page, page_size: LOG_PAGE_SIZE })
+})
+
+const BATCH_COLUMNS = `b.id, b.kind, b.run_id, b.trigger, b.model, b.started_at, b.finished_at,
+  b.requests, b.jobs, b.failed, b.duration_ms, b.input_tokens, b.output_tokens,
+  u.name AS user_name, u.role AS user_role`
+
+run.get("/api/model/batches", async (c) => {
+  const denied = masterGuard(c)
+  if (denied) return denied
+  const page = Math.max(1, Math.floor(Number(c.req.query("page") ?? 1)) || 1)
+  const [rows, count] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT ${BATCH_COLUMNS}
+       FROM model_batches b
+       LEFT JOIN users u ON u.id = b.user_id
+       ORDER BY b.id DESC LIMIT ? OFFSET ?`,
+    )
+      .bind(LOG_PAGE_SIZE, (page - 1) * LOG_PAGE_SIZE)
+      .all(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM model_batches`).first<{ n: number }>(),
+  ])
+  return c.json({ batches: rows.results, total: Number(count?.n ?? 0), page, page_size: LOG_PAGE_SIZE })
+})
+
+run.get("/api/model/batches/:id", async (c) => {
+  const denied = masterGuard(c)
+  if (denied) return denied
+  const id = Number(c.req.param("id"))
+  const batch = await c.env.DB.prepare(
+    `SELECT ${BATCH_COLUMNS}
+     FROM model_batches b
+     LEFT JOIN users u ON u.id = b.user_id
+     WHERE b.id = ?`,
+  )
+    .bind(id)
+    .first()
+  if (!batch) return c.json({ error: "not found" }, 404)
+  const requests = await c.env.DB.prepare(
+    `SELECT id, model, started_at, finished_at, duration_ms, jobs,
+       input_tokens, output_tokens, thought_tokens, ok, error
+     FROM model_requests WHERE batch_id = ? ORDER BY id`,
+  )
+    .bind(id)
+    .all()
+  return c.json({ batch, requests: requests.results })
 })
 
 run.get("/api/runs", async (c) => {

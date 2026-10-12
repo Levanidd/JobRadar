@@ -13,6 +13,7 @@ import {
 } from "./settings"
 import { trackCompany, type TrackResult } from "./sources"
 import type { Bindings, RawJob, SourceRow } from "./types"
+import { withUsage, type UsageContext } from "./usage"
 
 type RunResult = {
   source_id: number
@@ -636,7 +637,12 @@ async function fillLateDescriptions(
  * model in one pass, so a caller that wants to report progress can walk the
  * queue in steps instead of waiting out one opaque request.
  */
-export async function prefilterAndScore(env: Bindings, userId: number, limit?: number): Promise<ScorePass> {
+export async function prefilterAndScore(
+  env: Bindings,
+  userId: number,
+  limit?: number,
+  usage: UsageContext = { kind: "score", userId, trigger: "manual" },
+): Promise<ScorePass> {
   const blocked = await excludeBlockedCompaniesForUser(env, userId, "j.company_key")
 
   const open = await env.DB.prepare(
@@ -721,10 +727,13 @@ export async function prefilterAndScore(env: Bindings, userId: number, limit?: n
     }
   }
 
-  const scores = await scoreInBatches(
-    batch.map((item) => item.input),
-    await profileContent(env, userId),
-    await resolveScoringConfig(env),
+  const profile = await profileContent(env, userId)
+  const scores = await withUsage(env, usage, await resolveScoringConfig(env), (config) =>
+    scoreInBatches(
+      batch.map((item) => item.input),
+      profile,
+      config,
+    ),
   )
 
   const byId = new Map(batch.map((item) => [item.id, item]))
@@ -865,16 +874,23 @@ export async function scoreJobsByIds(env: Bindings, ids: string[], userId: numbe
   if (rows.results.length === 0) throw new Error("not found")
 
   const filled = await fillLateDescriptions(env, rows.results)
-  const scores = await scoreJobs(
-    rows.results.map((job) => ({
-      external_id: job.id,
-      title: job.title,
-      company: job.company,
-      location: job.location ?? "",
-      description: filled.get(job.id) ?? job.description ?? "",
-    })),
-    await profileContent(env, userId),
+  const profile = await profileContent(env, userId)
+  const scores = await withUsage(
+    env,
+    { kind: "job", userId, trigger: "manual" },
     await resolveScoringConfig(env),
+    (config) =>
+      scoreJobs(
+        rows.results.map((job) => ({
+          external_id: job.id,
+          title: job.title,
+          company: job.company,
+          location: job.location ?? "",
+          description: filled.get(job.id) ?? job.description ?? "",
+        })),
+        profile,
+        config,
+      ),
   )
   const byId = new Map(scores.map((row) => [row.external_id, row]))
 
