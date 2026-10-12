@@ -503,6 +503,12 @@ a:hover {
   align-self: stretch;
 }
 
+.notes-state {
+  min-height: 16px;
+  margin-top: -4px;
+  font-size: 12px;
+}
+
 .claude-comment {
   display: flex;
   flex-direction: column;

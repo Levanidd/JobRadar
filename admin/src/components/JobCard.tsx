@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react"
 
 import { api } from "../api"
 import { useAction } from "../app-context"
@@ -74,21 +74,85 @@ function Meta({ label, value }: { label: string; value: string | null }) {
   )
 }
 
+/** Long enough to wait out a burst of typing, short enough that closing the tab rarely loses a word. */
+const NOTES_AUTOSAVE_MS = 1000
+
+type SaveState = "idle" | "pending" | "saving" | "saved" | "error"
+
+const SAVE_LABEL: Record<SaveState, string> = {
+  idle: "",
+  pending: "Есть несохранённые изменения",
+  saving: "Сохраняю…",
+  saved: "Сохранено",
+  error: "Не сохранилось — попробую при следующей правке",
+}
+
 function Notes({ job, onSaved }: { job: Job; onSaved: (notes: string) => void }) {
   const run = useAction()
   const [text, setText] = useState(job.notes ?? "")
-  const saved = job.notes ?? ""
-  const [busy, setBusy] = useState(false)
+  const [state, setState] = useState<SaveState>("idle")
+  const saved = useRef(job.notes ?? "")
+  const latest = useRef(text)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** Saves go out one after another, so a slow early request cannot overwrite a later one. */
+  const queue = useRef<Promise<void>>(Promise.resolve())
+  const notify = useRef(onSaved)
+  latest.current = text
+  notify.current = onSaved
+
+  const persist = useCallback(
+    (id: string, value: string, current: boolean) => {
+      queue.current = queue.current.then(async () => {
+        if (value === saved.current) return
+        if (current) setState("saving")
+        const result = await run(() => api.saveJobNotes(id, value))
+        if (!result) {
+          if (current) setState("error")
+          return
+        }
+        if (!current) return
+        saved.current = result.notes ?? ""
+        notify.current(saved.current)
+        setState(latest.current === saved.current ? "saved" : "pending")
+      })
+    },
+    [run],
+  )
 
   useEffect(() => {
+    const id = job.id
     setText(job.notes ?? "")
-  }, [job.id, job.notes])
+    saved.current = job.notes ?? ""
+    setState("idle")
+    return () => {
+      clearTimeout(timer.current)
+      if (latest.current !== saved.current) persist(id, latest.current, false)
+    }
+    // Only a different job resets the editor; fresh notes for the same job are handled below.
+  }, [job.id])
 
-  async function save() {
-    setBusy(true)
-    const result = await run(() => api.saveJobNotes(job.id, text))
-    setBusy(false)
-    if (result) onSaved(result.notes ?? "")
+  useEffect(() => {
+    const incoming = job.notes ?? ""
+    if (latest.current === saved.current && incoming !== saved.current) {
+      saved.current = incoming
+      setText(incoming)
+    }
+  }, [job.notes])
+
+  function change(value: string) {
+    setText(value)
+    clearTimeout(timer.current)
+    if (value === saved.current) {
+      setState("idle")
+      return
+    }
+    setState("pending")
+    timer.current = setTimeout(() => persist(job.id, value, true), NOTES_AUTOSAVE_MS)
+  }
+
+  function flush() {
+    clearTimeout(timer.current)
+    if (latest.current !== saved.current) persist(job.id, latest.current, true)
   }
 
   return (
@@ -98,12 +162,13 @@ function Notes({ job, onSaved }: { job: Job; onSaved: (notes: string) => void })
           className="textarea textarea-notes"
           placeholder="С кем говорил, что отправил, следующие шаги…"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => change(event.target.value)}
+          onBlur={flush}
         />
       </Field>
-      <button className="btn btn-sm" disabled={busy || text === saved} onClick={() => void save()}>
-        {busy ? "Сохраняю…" : "Сохранить заметку"}
-      </button>
+      <span className={`notes-state ${state === "error" ? "error-text" : "muted"}`} aria-live="polite">
+        {SAVE_LABEL[state]}
+      </span>
     </div>
   )
 }
