@@ -728,7 +728,7 @@ export async function prefilterAndScore(
   }
 
   const profile = await profileContent(env, userId)
-  const scores = await withUsage(env, usage, await resolveScoringConfig(env), (config) =>
+  const { scores, skipped } = await withUsage(env, usage, await resolveScoringConfig(env), (config) =>
     scoreInBatches(
       batch.map((item) => item.input),
       profile,
@@ -764,7 +764,10 @@ export async function prefilterAndScore(
   return {
     scored: scores.length,
     remaining,
-    more: (remaining > 0 && scores.length > 0) || (open.results.length === CANDIDATE_WINDOW && resolved > 0),
+    more:
+      skipped > 0 ||
+      (remaining > 0 && scores.length > 0) ||
+      (open.results.length === CANDIDATE_WINDOW && resolved > 0),
   }
 }
 

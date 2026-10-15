@@ -188,6 +188,19 @@ function normalise(raw: unknown): ScoreOutput[] {
 }
 
 const THINKING_UNSUPPORTED = /thinking level/i
+const RETRYABLE_STATUS = /Gemini call failed: (429|5\d\d)\b/
+const RETRIES = 2
+const RETRY_WAIT_MS = [800, 1600]
+
+/** 429 / 5xx / 524 are the model's (or Cloudflare's) transient failures. */
+export function isRetryableGemini(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error)
+  return RETRYABLE_STATUS.test(text)
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 async function generate(
   apiKey: string,
@@ -232,8 +245,7 @@ async function tracedGenerate(
   jobs: number,
   onCall?: (call: ModelCall) => void,
 ): Promise<GeminiResponse> {
-  const started = Date.now()
-  const report = (body: GeminiResponse | null, error: unknown) => {
+  const report = (started: number, body: GeminiResponse | null, error: unknown) => {
     if (!onCall) return
     const finished = Date.now()
     const usage = body?.usageMetadata
@@ -251,14 +263,22 @@ async function tracedGenerate(
       error: error ? (error instanceof Error ? error.message : String(error)).slice(0, 300) : null,
     })
   }
-  try {
-    const body = await generate(apiKey, model, payload)
-    report(body, null)
-    return body
-  } catch (error) {
-    report(null, error)
-    throw error
+
+  let last: unknown
+  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+    const started = Date.now()
+    try {
+      const body = await generate(apiKey, model, payload)
+      report(started, body, null)
+      return body
+    } catch (error) {
+      last = error
+      report(started, null, error)
+      if (!isRetryableGemini(error) || attempt === RETRIES) throw error
+      await wait(RETRY_WAIT_MS[attempt] ?? RETRY_WAIT_MS[RETRY_WAIT_MS.length - 1]!)
+    }
   }
+  throw last
 }
 
 export type ModelOption = { id: string; label: string }
@@ -355,11 +375,19 @@ export async function scoreInBatches(
   jobs: ScoreInput[],
   profile: string,
   config: ScoringConfig,
-): Promise<ScoreOutput[]> {
-  const out: ScoreOutput[] = []
+): Promise<{ scores: ScoreOutput[]; skipped: number }> {
+  const scores: ScoreOutput[] = []
+  let skipped = 0
   for (let i = 0; i < jobs.length; i += 10) {
     const chunk = jobs.slice(i, i + 10)
-    out.push(...(await scoreJobs(chunk, profile, config)))
+    try {
+      scores.push(...(await scoreJobs(chunk, profile, config)))
+    } catch (error) {
+      // A 524 on one chunk used to failCycle the whole run. Leave these jobs
+      // unscored; the next scoring hop picks them up.
+      if (!isRetryableGemini(error)) throw error
+      skipped += chunk.length
+    }
   }
-  return out
+  return { scores, skipped }
 }
