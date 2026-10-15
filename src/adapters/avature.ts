@@ -9,7 +9,7 @@ const classic = fromCareerOps(avatureProvider, {
 })
 
 /** How many listing pages to open at once. A board of ~600 is ~40 pages. */
-const PAGE_CONCURRENCY = 16
+const PAGE_CONCURRENCY = 24
 /** Stop a branded board that never prints its total, so a hop stays inside the fetch budget. */
 const MAX_PAGES = 80
 

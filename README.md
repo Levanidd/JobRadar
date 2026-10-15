@@ -38,7 +38,7 @@ npm run deploy
 
 Locally: `npm run dev` → `GET http://127.0.0.1:43142/api/health`.
 
-A run starts from the admin **Run** button (`POST /api/run`) or from the master's auto-run schedule. Cron (`* * * * *`) also resumes a cycle that Cloudflare dropped mid-`waitUntil` if nothing moved for 45 seconds, so you can close the tab. Large boards are written in slices of 200 jobs so one hop fits the Worker budget.
+A run starts from the admin **Run** button (`POST /api/run`) or from the master's auto-run schedule. Cron (`* * * * *`) also resumes a cycle that Cloudflare dropped mid-`waitUntil` if nothing moved for 25 seconds, so you can close the tab. Large boards are written in slices of 400 jobs so one hop fits the Worker budget.
 
 ## Admin
 

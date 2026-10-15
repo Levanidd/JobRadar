@@ -118,7 +118,7 @@ export type SourceStep = RunResult & {
  * budget; since the writes go out in batches rather than one statement at a time,
  * it can be far wider than the round-trip-per-row version could afford.
  */
-const SOURCE_CHUNK = 200
+const SOURCE_CHUNK = 400
 const FETCH_CACHE_MS = 10 * 60_000
 
 type FetchCache = { key: string; jobs: RawJob[]; at: number }
@@ -150,11 +150,11 @@ async function loadBoard(
     return fetchCache.jobs
   }
   const adapter = getAdapter(source.provider)
-  // Branded Avature is ~40 listing pages. 20s was the whole budget and a slow
-  // hop still finishes before the 45s stuck-cycle check.
+  // A hop has to finish well inside the 30s waitUntil window. 35s let one
+  // branded board eat the whole burst and then sit idle until the next cron.
   const jobs = await timed(
     adapter.fetchJobs(source.token, env),
-    35_000,
+    20_000,
     `${source.label}: fetch timed out`,
   )
   fetchCache = { key, jobs, at: Date.now() }
@@ -603,7 +603,7 @@ async function profileContent(env: Bindings, userId: number): Promise<string> {
 }
 
 /** How many detail pages to open at once. Workday rate-limits bursts. */
-const DETAIL_CONCURRENCY = 4
+const DETAIL_CONCURRENCY = 6
 
 /**
  * Some boards (Workday, Zalando) list postings without a body. Pull it before

@@ -365,14 +365,16 @@ export function enqueueTick(env: Bindings, ctx: { waitUntil(promise: Promise<unk
 }
 
 /**
- * Cloudflare kills waitUntil. Cron picks the cycle back up if nothing has
- * moved in 45 seconds, so closing the tab does not freeze a run.
+ * Cloudflare kills waitUntil around 30s. Cron runs every minute; 45s of
+ * silence skipped that next tick (age ~32s) and the cycle sat idle a
+ * whole extra minute. 25s is just above a 20s fetch hop, so a live hop
+ * is left alone and the following cron always continues.
  */
 export async function resumeStuckCycle(env: Bindings): Promise<void> {
   const claimed = await env.DB.prepare(
     `UPDATE cycles SET updated_at = datetime('now')
      WHERE id = 1 AND status = 'running'
-       AND updated_at < datetime('now', '-45 seconds')`,
+       AND updated_at < datetime('now', '-25 seconds')`,
   ).run()
   if (!Number(claimed.meta.changes)) return
   await walkCycle(env)
