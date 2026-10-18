@@ -16,6 +16,7 @@ import type {
   RunResult,
   BlacklistedCompany,
   PrefilterRules,
+  ScoringProvider,
   Settings,
   Source,
   JobStats,
@@ -421,11 +422,15 @@ export const api = {
     return request("/settings")
   },
 
-  models(): Promise<{ models: ModelOption[]; error?: string }> {
-    return request("/models")
+  models(provider: ScoringProvider): Promise<{ models: ModelOption[]; error?: string }> {
+    return request(`/models?provider=${provider}`)
   },
 
-  saveSettings(body: { model?: string; thinking_level?: ThinkingLevel }): Promise<Settings> {
+  saveSettings(body: {
+    provider?: ScoringProvider
+    model?: string
+    thinking_level?: ThinkingLevel
+  }): Promise<Settings> {
     return request("/settings", { method: "PUT", body: JSON.stringify(body) })
   },
 }

@@ -6,7 +6,7 @@ Spec: [`docs/SPEC.md`](docs/SPEC.md).
 
 ## Stack
 
-TypeScript, Hono, Cloudflare Workers, D1, Cron. Gemini scoring is optional (`GEMINI_API_KEY`); without a key, a local keyword heuristic is used.
+TypeScript, Hono, Cloudflare Workers, D1, Cron. LLM scoring is optional: Google Gemini (`GEMINI_API_KEY`) or Nebius Token Factory (`NEBIUS_API_KEY`), picked in Settings. Without a key for the chosen provider, a local keyword heuristic is used.
 
 ## Run it yourself
 
@@ -30,6 +30,7 @@ npx wrangler d1 migrations apply job-scout --remote
 npx wrangler secret put ADMIN_TOKEN
 npx wrangler secret put GEMINI_API_KEY         # Gemini scoring; without it, local heuristic
 npx wrangler secret put GEMINI_MODEL           # optional, defaults to gemini-3.7-flash
+npx wrangler secret put NEBIUS_API_KEY         # optional, Nebius Token Factory scoring
 npx wrangler secret put TELEGRAM_BOT_TOKEN     # digest; without it, jobs stay in D1
 npx wrangler secret put TELEGRAM_CHAT_ID
 
@@ -105,7 +106,8 @@ The first login with `ADMIN_TOKEN`, while `users` is empty, creates the master a
 | GET | `/api/stats` | found / viewed / applied funnel, application breakdown, week and month series; `?days=N` limits the funnel and breakdown, series stay at 12 weeks and 12 months |
 | GET/PUT | `/api/profile` | scoring text, keep/drop tags, company blacklist |
 | POST | `/api/profile/rescore` | clear scores and rescore |
-| GET/PUT | `/api/settings` | Gemini model — master only |
+| GET/PUT | `/api/settings` | scoring provider, model, thinking level — master only |
+| GET | `/api/models?provider=gemini\|nebius` | models available for the provider's key |
 | GET | `/api/runs` | last 50 source runs |
 | POST | `/api/mcp` | MCP for Claude and Cursor: read-only SQL. Tools `schema` and `query` (one SELECT) |
 
@@ -137,6 +139,7 @@ The first run of a source with `bootstrapped=0` does not send notifications (col
 | `ADMIN_TOKEN` | creates the first master; later logins use personal tokens |
 | `GEMINI_API_KEY` | Gemini scoring |
 | `GEMINI_MODEL` | model name, default `gemini-3.7-flash` |
+| `NEBIUS_API_KEY` | Nebius Token Factory scoring (OpenAI-compatible API); `CHANGE_ME` counts as unset |
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | digest |
 | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | optional source |
 

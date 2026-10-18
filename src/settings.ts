@@ -6,14 +6,21 @@ import {
 } from "./prefilter"
 import {
   DEFAULT_MODEL,
+  DEFAULT_NEBIUS_MODEL,
+  DEFAULT_PROVIDER,
   DEFAULT_THINKING_LEVEL,
+  SCORING_PROVIDERS,
+  isScoringProvider,
   isThinkingLevel,
   type ScoringConfig,
+  type ScoringProvider,
   type ThinkingLevel,
 } from "./scoring"
 import type { Bindings } from "./types"
 
+export const SETTING_PROVIDER = "scoring_provider"
 export const SETTING_MODEL = "gemini_model"
+export const SETTING_NEBIUS_MODEL = "nebius_model"
 export const SETTING_THINKING = "gemini_thinking_level"
 export const SETTING_PREFILTER_KEEP = "prefilter_keep"
 export const SETTING_PREFILTER_DROP = "prefilter_drop"
@@ -190,29 +197,98 @@ export async function listOpenCompanies(env: Bindings): Promise<BlacklistedCompa
   return rows.results
 }
 
+/** The Cloudflare secret is created with this value so the master can find it in the dashboard and fill it in. */
+export const KEY_PLACEHOLDER = "CHANGE_ME"
+
+const PROVIDER_META: Record<ScoringProvider, { label: string; keyName: string; modelSetting: string }> = {
+  gemini: { label: "Google Gemini", keyName: "GEMINI_API_KEY", modelSetting: SETTING_MODEL },
+  nebius: { label: "Nebius Token Factory", keyName: "NEBIUS_API_KEY", modelSetting: SETTING_NEBIUS_MODEL },
+}
+
+export function providerKeyName(provider: ScoringProvider): string {
+  return PROVIDER_META[provider].keyName
+}
+
+export function providerModelSetting(provider: ScoringProvider): string {
+  return PROVIDER_META[provider].modelSetting
+}
+
+export function providerKey(env: Bindings, provider: ScoringProvider): string | undefined {
+  const key = (provider === "nebius" ? env.NEBIUS_API_KEY : env.GEMINI_API_KEY)?.trim()
+  return key && key !== KEY_PLACEHOLDER ? key : undefined
+}
+
+type ModelSource = "database" | "secret" | "default"
+
 /** DB wins over the GEMINI_MODEL secret so the model stays changeable from the admin. */
-export async function resolveScoringConfig(env: Bindings): Promise<ScoringConfig> {
-  const [model, thinking] = await Promise.all([read(env, SETTING_MODEL), read(env, SETTING_THINKING)])
+function modelFor(env: Bindings, provider: ScoringProvider, stored: string | null): { model: string; source: ModelSource } {
+  if (stored) return { model: stored, source: "database" }
+  if (provider === "gemini" && env.GEMINI_MODEL) return { model: env.GEMINI_MODEL, source: "secret" }
+  return { model: provider === "nebius" ? DEFAULT_NEBIUS_MODEL : DEFAULT_MODEL, source: "default" }
+}
+
+async function readScoring(env: Bindings) {
+  const [provider, gemini, nebius, thinking] = await Promise.all([
+    read(env, SETTING_PROVIDER),
+    read(env, SETTING_MODEL),
+    read(env, SETTING_NEBIUS_MODEL),
+    read(env, SETTING_THINKING),
+  ])
   return {
-    apiKey: env.GEMINI_API_KEY,
-    model: model ?? env.GEMINI_MODEL ?? DEFAULT_MODEL,
-    thinkingLevel: thinking && isThinkingLevel(thinking) ? thinking : DEFAULT_THINKING_LEVEL,
+    provider: provider && isScoringProvider(provider) ? provider : DEFAULT_PROVIDER,
+    models: { gemini, nebius } as Record<ScoringProvider, string | null>,
+    thinking: thinking && isThinkingLevel(thinking) ? thinking : DEFAULT_THINKING_LEVEL,
   }
 }
 
+export async function resolveScoringConfig(env: Bindings): Promise<ScoringConfig> {
+  const stored = await readScoring(env)
+  return {
+    provider: stored.provider,
+    apiKey: providerKey(env, stored.provider),
+    model: modelFor(env, stored.provider, stored.models[stored.provider]).model,
+    thinkingLevel: stored.thinking,
+  }
+}
+
+export type ProviderView = {
+  id: ScoringProvider
+  label: string
+  key_name: string
+  key_configured: boolean
+  model: string
+  source: ModelSource
+}
+
 export type SettingsView = {
+  provider: ScoringProvider
   model: string
   thinking_level: ThinkingLevel
-  source: "database" | "secret" | "default"
+  source: ModelSource
   key_configured: boolean
+  providers: ProviderView[]
 }
 
 export async function settingsView(env: Bindings): Promise<SettingsView> {
-  const [stored, thinking] = await Promise.all([read(env, SETTING_MODEL), read(env, SETTING_THINKING)])
+  const stored = await readScoring(env)
+  const providers = SCORING_PROVIDERS.map((id): ProviderView => {
+    const { model, source } = modelFor(env, id, stored.models[id])
+    return {
+      id,
+      label: PROVIDER_META[id].label,
+      key_name: PROVIDER_META[id].keyName,
+      key_configured: Boolean(providerKey(env, id)),
+      model,
+      source,
+    }
+  })
+  const active = providers.find((item) => item.id === stored.provider)!
   return {
-    model: stored ?? env.GEMINI_MODEL ?? DEFAULT_MODEL,
-    thinking_level: thinking && isThinkingLevel(thinking) ? thinking : DEFAULT_THINKING_LEVEL,
-    source: stored ? "database" : env.GEMINI_MODEL ? "secret" : "default",
-    key_configured: Boolean(env.GEMINI_API_KEY),
+    provider: active.id,
+    model: active.model,
+    thinking_level: stored.thinking,
+    source: active.source,
+    key_configured: active.key_configured,
+    providers,
   }
 }

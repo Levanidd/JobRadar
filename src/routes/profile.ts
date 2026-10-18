@@ -3,13 +3,16 @@ import { Hono } from "hono"
 import { currentUser, masterGuard } from "../auth"
 import { message } from "../errors"
 import { prefilterAndScore, reapplyPrefilter } from "../ingest"
-import { isThinkingLevel, listModels, validateModel, type ThinkingLevel } from "../scoring"
+import { isScoringProvider, isThinkingLevel, listModels, validateModel, type ScoringProvider } from "../scoring"
 import {
   PROFILE_PROMPT_MAX,
-  SETTING_MODEL,
   SETTING_PROFILE_PROMPT,
+  SETTING_PROVIDER,
   SETTING_THINKING,
   listOpenCompanies,
+  providerKey,
+  providerKeyName,
+  providerModelSetting,
   readProfilePrompt,
   settingsView,
   writeSetting,
@@ -115,9 +118,15 @@ profile.put("/api/profile/prompt", async (c) => {
 profile.get("/api/settings", async (c) => c.json(await settingsView(c.env)))
 
 profile.get("/api/models", async (c) => {
-  if (!c.env.GEMINI_API_KEY) return c.json({ models: [], error: "GEMINI_API_KEY is not configured" })
+  const requested = c.req.query("provider")
+  if (requested !== undefined && !isScoringProvider(requested)) {
+    return c.json({ models: [], error: "bad provider" }, 400)
+  }
+  const provider: ScoringProvider = requested ?? (await settingsView(c.env)).provider
+  const apiKey = providerKey(c.env, provider)
+  if (!apiKey) return c.json({ models: [], error: `${providerKeyName(provider)} is not configured` })
   try {
-    return c.json({ models: await listModels(c.env.GEMINI_API_KEY) })
+    return c.json({ models: await listModels(provider, apiKey) })
   } catch (error) {
     return c.json({ models: [], error: message(error) }, 502)
   }
@@ -126,28 +135,34 @@ profile.get("/api/models", async (c) => {
 profile.put("/api/settings", async (c) => {
   const denied = masterGuard(c)
   if (denied) return denied
-  const body = await c.req.json<{ model?: string; thinking_level?: string }>()
+  const body = await c.req.json<{ provider?: string; model?: string; thinking_level?: string }>()
+  const provider = body.provider?.trim()
   const model = body.model?.trim()
   const thinking = body.thinking_level?.trim()
 
+  if (provider && !isScoringProvider(provider)) return c.json({ error: "bad provider" }, 400)
   if (thinking && !isThinkingLevel(thinking)) return c.json({ error: "bad thinking_level" }, 400)
-  if (!model && !thinking) return c.json({ error: "nothing to update" }, 400)
+  if (!provider && !model && !thinking) return c.json({ error: "nothing to update" }, 400)
 
-  if (model) {
-    if (!c.env.GEMINI_API_KEY) return c.json({ error: "GEMINI_API_KEY is not configured" }, 400)
-    const level: ThinkingLevel = isThinkingLevel(thinking ?? "")
-      ? (thinking as ThinkingLevel)
-      : (await settingsView(c.env)).thinking_level
-    const apiKey = c.env.GEMINI_API_KEY
+  const current = await settingsView(c.env)
+  const target: ScoringProvider = provider && isScoringProvider(provider) ? provider : current.provider
+  const switching = target !== current.provider
+  const candidate = model ?? (switching ? current.providers.find((item) => item.id === target)?.model : undefined)
+
+  if (candidate) {
+    const apiKey = providerKey(c.env, target)
+    if (!apiKey) return c.json({ error: `${providerKeyName(target)} is not configured` }, 400)
+    const thinkingLevel = thinking && isThinkingLevel(thinking) ? thinking : current.thinking_level
     try {
       await withUsage(c.env, { kind: "check", userId: currentUser(c).id, trigger: "manual" }, {}, (config) =>
-        validateModel(apiKey, model, level, config.onCall),
+        validateModel({ provider: target, apiKey, model: candidate, thinkingLevel, onCall: config.onCall }),
       )
     } catch (error) {
       return c.json({ error: message(error) }, 400)
     }
-    await writeSetting(c.env, SETTING_MODEL, model)
+    await writeSetting(c.env, providerModelSetting(target), candidate)
   }
+  if (switching) await writeSetting(c.env, SETTING_PROVIDER, target)
   if (thinking) await writeSetting(c.env, SETTING_THINKING, thinking)
 
   return c.json(await settingsView(c.env))

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { startCycle, walkCycle } from "../src/cycle"
 import worker from "../src/index"
@@ -509,7 +509,58 @@ describe("profile", () => {
 
   it("reports that scoring falls back without a key", async () => {
     const res = await call("/api/settings")
-    expect(res.body).toMatchObject({ key_configured: false, source: "default", thinking_level: "LOW" })
+    expect(res.body).toMatchObject({
+      provider: "gemini",
+      key_configured: false,
+      source: "default",
+      thinking_level: "LOW",
+    })
+    expect(res.body.providers.map((item: { id: string }) => item.id)).toEqual(["gemini", "nebius"])
+  })
+
+  it("switches scoring to Nebius after a live check and keeps the Gemini pick", async () => {
+    env.NEBIUS_API_KEY = "nebius-key"
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: "pong" } }], usage: { prompt_tokens: 3, completion_tokens: 1 } })),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      const res = await call("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({ provider: "nebius", model: "Qwen/Qwen3-32B" }),
+      })
+
+      expect(res).toMatchObject({
+        status: 200,
+        body: { provider: "nebius", model: "Qwen/Qwen3-32B", source: "database", key_configured: true },
+      })
+      expect(res.body.providers[0]).toMatchObject({ id: "gemini", model: "gemini-3.7-flash", key_configured: false })
+      expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe(
+        "https://api.tokenfactory.nebius.com/v1/chat/completions",
+      )
+      expect((await call("/api/settings")).body).toMatchObject({ provider: "nebius", model: "Qwen/Qwen3-32B" })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("treats the placeholder Nebius secret as missing", async () => {
+    env.NEBIUS_API_KEY = "CHANGE_ME"
+    const put = await call("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ provider: "nebius", model: "x" }),
+    })
+    expect(put).toMatchObject({ status: 400, body: { error: "NEBIUS_API_KEY is not configured" } })
+    expect((await call("/api/models?provider=nebius")).body).toEqual({
+      models: [],
+      error: "NEBIUS_API_KEY is not configured",
+    })
+    expect((await call("/api/settings")).body.providers[1]).toMatchObject({ id: "nebius", key_configured: false })
+  })
+
+  it("rejects an unknown provider", async () => {
+    expect((await call("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "openai" }) })).status).toBe(400)
+    expect((await call("/api/models?provider=openai")).status).toBe(400)
   })
 })
 

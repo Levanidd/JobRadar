@@ -9,8 +9,10 @@ alwaysApply: true
   Логику источника не хардкодить в ingest.ts.
 - К каждому адаптеру — фикстура РЕАЛЬНОГО ответа в test/fixtures/ (сохранённая curl'ом, не выдуманная)
   и тест парсинга.
-- Вызовы LLM только в src/scoring.ts: Gemini generateContent со structured output (responseSchema).
-  Модель и ключ берутся из секретов GEMINI_MODEL и GEMINI_API_KEY, в код не хардкодятся.
+- Вызовы LLM только в src/scoring.ts: Gemini generateContent со structured output (responseSchema)
+  или Nebius Token Factory (OpenAI-совместимый chat/completions с response_format json_schema).
+  Ресурс и модель выбираются в настройках (таблица settings), ключи — только секреты
+  GEMINI_API_KEY и NEBIUS_API_KEY, в код не хардкодятся.
 - Секреты только через env-биндинги, никаких ключей в коде, тестах и фикстурах.
 - Ошибка одного источника не прерывает прогон остальных.
 - Перед предложением деплоя запускай npm test.

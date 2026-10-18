@@ -17,6 +17,19 @@ export type ScoreOutput = {
 
 export const DEFAULT_MODEL = "gemini-3.7-flash"
 
+export const SCORING_PROVIDERS = ["gemini", "nebius"] as const
+export type ScoringProvider = (typeof SCORING_PROVIDERS)[number]
+export const DEFAULT_PROVIDER: ScoringProvider = "gemini"
+
+export const DEFAULT_NEBIUS_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+export const NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1"
+
+const PROVIDER_NAMES: Record<ScoringProvider, string> = { gemini: "Gemini", nebius: "Nebius" }
+
+export function isScoringProvider(value: string): value is ScoringProvider {
+  return (SCORING_PROVIDERS as readonly string[]).includes(value)
+}
+
 export const THINKING_LEVELS = ["LOW", "MEDIUM", "HIGH"] as const
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
 
@@ -38,6 +51,7 @@ export type ModelCall = {
 }
 
 export type ScoringConfig = {
+  provider?: ScoringProvider
   apiKey?: string
   model?: string
   thinkingLevel?: ThinkingLevel
@@ -47,6 +61,8 @@ export type ScoringConfig = {
 export function isThinkingLevel(value: string): value is ThinkingLevel {
   return (THINKING_LEVELS as readonly string[]).includes(value)
 }
+
+const FLAGS = ["german_required", "not_senior", "relocation_only", "agency_posting"]
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -59,13 +75,7 @@ const RESPONSE_SCHEMA = {
           external_id: { type: "string" },
           score: { type: "integer", minimum: 0, maximum: 100 },
           reason: { type: "string" },
-          flags: {
-            type: "array",
-            items: {
-              type: "string",
-              enum: ["german_required", "not_senior", "relocation_only", "agency_posting"],
-            },
-          },
+          flags: { type: "array", items: { type: "string", enum: FLAGS } },
         },
         required: ["external_id", "score", "reason", "flags"],
         propertyOrdering: ["external_id", "score", "reason", "flags"],
@@ -73,7 +83,42 @@ const RESPONSE_SCHEMA = {
     },
   },
   required: ["scores"],
-} as const
+}
+
+/** OpenAI-style strict schema: no Gemini-only keywords, closed objects. */
+const CHAT_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "job_scores",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        scores: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              external_id: { type: "string" },
+              score: { type: "integer" },
+              reason: { type: "string" },
+              flags: { type: "array", items: { type: "string", enum: FLAGS } },
+            },
+            required: ["external_id", "score", "reason", "flags"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["scores"],
+      additionalProperties: false,
+    },
+  },
+}
+
+const CHAT_JSON_HINT = `
+
+Answer with JSON only, no prose: {"scores":[{"external_id":"<id>","score":<0-100>,"reason":"<one sentence>","flags":[]}]}.
+Allowed flags: ${FLAGS.join(", ")}.`
 
 export function scoringSystemPrompt(profile: string): string {
   return `You score job postings for a personal job search.
@@ -156,6 +201,22 @@ type GeminiResponse = {
   }
 }
 
+type ChatResponse = {
+  choices?: Array<{ message?: { content?: string | null } }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    completion_tokens_details?: { reasoning_tokens?: number } | null
+  }
+}
+
+type Prompt = { system?: string; user: string; json: boolean }
+
+/** Output already includes thinking; thought is kept apart for the breakdown. */
+type Completion = { text: string; input: number; output: number; thought: number }
+
+type Target = { provider: ScoringProvider; apiKey: string; model: string; thinkingLevel: ThinkingLevel }
+
 function renderJobs(jobs: ScoreInput[]): string {
   return jobs
     .map(
@@ -166,9 +227,9 @@ function renderJobs(jobs: ScoreInput[]): string {
 }
 
 /** The schema constrains shape but not values, so scores still get clamped here. */
-function normalise(raw: unknown): ScoreOutput[] {
+function normalise(raw: unknown, name: string): ScoreOutput[] {
   if (!raw || typeof raw !== "object" || !Array.isArray((raw as { scores?: unknown }).scores)) {
-    throw new Error("Gemini returned no scores array")
+    throw new Error(`${name} returned no scores array`)
   }
   const scores = (raw as { scores: unknown[] }).scores
   return scores.flatMap((entry) => {
@@ -187,13 +248,23 @@ function normalise(raw: unknown): ScoreOutput[] {
   })
 }
 
+/** Reasoning models behind OpenAI-compatible APIs may wrap the answer in <think> or a code fence. */
+function extractJson(text: string): string {
+  const visible = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+  const start = visible.indexOf("{")
+  const end = visible.lastIndexOf("}")
+  return start >= 0 && end > start ? visible.slice(start, end + 1) : visible
+}
+
 const THINKING_UNSUPPORTED = /thinking level/i
-const RETRYABLE_STATUS = /Gemini call failed: (429|5\d\d)\b/
+const SCHEMA_UNSUPPORTED = /response_format|json_schema|guided|schema/i
+const RETRYABLE_STATUS = /(Gemini|Nebius) call failed: (429|5\d\d)\b/
 const RETRIES = 2
 const RETRY_WAIT_MS = [800, 1600]
+const PING_MAX_TOKENS = 16
 
 /** 429 / 5xx / 524 are the model's (or Cloudflare's) transient failures. */
-export function isRetryableGemini(error: unknown): boolean {
+export function isRetryableModelError(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error)
   return RETRYABLE_STATUS.test(text)
 }
@@ -238,27 +309,84 @@ async function generate(
 }
 
 /** Thinking is billed as output, so it is counted there and also kept apart for the breakdown. */
-async function tracedGenerate(
-  apiKey: string,
-  model: string,
-  payload: Record<string, unknown>,
+async function geminiComplete(target: Target, prompt: Prompt): Promise<Completion> {
+  const body = await generate(target.apiKey, target.model, {
+    ...(prompt.system ? { systemInstruction: { parts: [{ text: prompt.system }] } } : {}),
+    contents: [{ role: "user", parts: [{ text: prompt.user }] }],
+    generationConfig: {
+      temperature: 0,
+      ...(prompt.json ? { responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA } : {}),
+      thinkingConfig: { thinkingLevel: target.thinkingLevel },
+    },
+  })
+  const usage = body.usageMetadata
+  const thoughts = usage?.thoughtsTokenCount ?? 0
+  return {
+    text: (body.candidates?.[0]?.content?.parts ?? [])
+      .map((part) => part.text ?? "")
+      .join("")
+      .trim(),
+    input: usage?.promptTokenCount ?? 0,
+    output: (usage?.candidatesTokenCount ?? 0) + thoughts,
+    thought: thoughts,
+  }
+}
+
+async function nebiusComplete(target: Target, prompt: Prompt): Promise<Completion> {
+  const messages = [
+    ...(prompt.system ? [{ role: "system", content: prompt.system }] : []),
+    { role: "user", content: prompt.user },
+  ]
+  const send = (extra: Record<string, unknown>) =>
+    fetch(`${NEBIUS_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${target.apiKey}` },
+      body: JSON.stringify({ model: target.model, messages, temperature: 0, ...extra }),
+    })
+
+  let res = await send(prompt.json ? { response_format: CHAT_RESPONSE_FORMAT } : { max_tokens: PING_MAX_TOKENS })
+
+  if (res.status === 400 && prompt.json) {
+    const detail = await res.text().catch(() => "")
+    if (!SCHEMA_UNSUPPORTED.test(detail)) {
+      throw new Error(`Nebius call failed: 400 ${detail.slice(0, 200)}`)
+    }
+    // Not every Token Factory model supports schema-guided decoding; plain JSON mode works on more of them.
+    res = await send({ response_format: { type: "json_object" } })
+  }
+
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => "")).slice(0, 200)
+    throw new Error(`Nebius call failed: ${res.status} ${detail}`)
+  }
+  const body = (await res.json()) as ChatResponse
+  return {
+    text: body.choices?.[0]?.message?.content?.trim() ?? "",
+    input: body.usage?.prompt_tokens ?? 0,
+    output: body.usage?.completion_tokens ?? 0,
+    thought: body.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
+  }
+}
+
+async function tracedComplete(
+  target: Target,
+  prompt: Prompt,
   jobs: number,
   onCall?: (call: ModelCall) => void,
-): Promise<GeminiResponse> {
-  const report = (started: number, body: GeminiResponse | null, error: unknown) => {
+): Promise<Completion> {
+  const complete = target.provider === "nebius" ? nebiusComplete : geminiComplete
+  const report = (started: number, result: Completion | null, error: unknown) => {
     if (!onCall) return
     const finished = Date.now()
-    const usage = body?.usageMetadata
-    const thoughts = usage?.thoughtsTokenCount ?? 0
     onCall({
-      model,
+      model: target.model,
       started_at: new Date(started).toISOString(),
       finished_at: new Date(finished).toISOString(),
       duration_ms: finished - started,
       jobs,
-      input_tokens: usage?.promptTokenCount ?? 0,
-      output_tokens: (usage?.candidatesTokenCount ?? 0) + thoughts,
-      thought_tokens: thoughts,
+      input_tokens: result?.input ?? 0,
+      output_tokens: result?.output ?? 0,
+      thought_tokens: result?.thought ?? 0,
       ok: !error,
       error: error ? (error instanceof Error ? error.message : String(error)).slice(0, 300) : null,
     })
@@ -268,17 +396,28 @@ async function tracedGenerate(
   for (let attempt = 0; attempt <= RETRIES; attempt++) {
     const started = Date.now()
     try {
-      const body = await generate(apiKey, model, payload)
-      report(started, body, null)
-      return body
+      const result = await complete(target, prompt)
+      report(started, result, null)
+      return result
     } catch (error) {
       last = error
       report(started, null, error)
-      if (!isRetryableGemini(error) || attempt === RETRIES) throw error
+      if (!isRetryableModelError(error) || attempt === RETRIES) throw error
       await wait(RETRY_WAIT_MS[attempt] ?? RETRY_WAIT_MS[RETRY_WAIT_MS.length - 1]!)
     }
   }
   throw last
+}
+
+function resolveTarget(config: ScoringConfig & { apiKey: string }): Target {
+  const provider = config.provider ?? DEFAULT_PROVIDER
+  const fallback = provider === "nebius" ? DEFAULT_NEBIUS_MODEL : DEFAULT_MODEL
+  return {
+    provider,
+    apiKey: config.apiKey,
+    model: config.model?.trim() || fallback,
+    thinkingLevel: config.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+  }
 }
 
 export type ModelOption = { id: string; label: string }
@@ -295,7 +434,7 @@ type ModelsResponse = {
   models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }>
 }
 
-export async function listModels(apiKey: string): Promise<ModelOption[]> {
+async function listGeminiModels(apiKey: string): Promise<ModelOption[]> {
   const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
     headers: { "x-goog-api-key": apiKey },
   })
@@ -311,23 +450,51 @@ export async function listModels(apiKey: string): Promise<ModelOption[]> {
     .sort((a, b) => b.id.localeCompare(a.id))
 }
 
+type NebiusModelsResponse = {
+  data?: Array<{
+    id?: string
+    name?: string
+    architecture?: { modality?: string }
+    pricing?: { prompt?: string; completion?: string }
+  }>
+}
+
+/** Pricing comes per token; the UI shows dollars per million, like the Token Factory model cards. */
+function perMillion(price: string | undefined): string | null {
+  if (!price) return null
+  const value = Number(price)
+  return Number.isFinite(value) ? `$${(value * 1_000_000).toFixed(2)}` : null
+}
+
+async function listNebiusModels(apiKey: string): Promise<ModelOption[]> {
+  const res = await fetch(`${NEBIUS_BASE_URL}/models?verbose=true`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  })
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => "")).slice(0, 200)
+    throw new Error(`Nebius model list failed: ${res.status} ${detail}`)
+  }
+  const body = (await res.json()) as NebiusModelsResponse
+  return (body.data ?? [])
+    .filter((model) => model.id && (!model.architecture?.modality || model.architecture.modality.endsWith("->text")))
+    .map((model) => {
+      const input = perMillion(model.pricing?.prompt)
+      const output = perMillion(model.pricing?.completion)
+      const price = input && output ? ` · ${input} / ${output} за 1M` : ""
+      return { id: model.id!, label: `${model.name || model.id}${price}` }
+    })
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+export function listModels(provider: ScoringProvider, apiKey: string): Promise<ModelOption[]> {
+  return provider === "nebius" ? listNebiusModels(apiKey) : listGeminiModels(apiKey)
+}
+
 /** Throws if the model cannot actually be called, so a bad pick fails at save time. */
 export async function validateModel(
-  apiKey: string,
-  model: string,
-  thinkingLevel: ThinkingLevel,
-  onCall?: (call: ModelCall) => void,
+  config: ScoringConfig & { apiKey: string; model: string },
 ): Promise<void> {
-  await tracedGenerate(
-    apiKey,
-    model,
-    {
-      contents: [{ role: "user", parts: [{ text: "ping" }] }],
-      generationConfig: { temperature: 0, thinkingConfig: { thinkingLevel } },
-    },
-    0,
-    onCall,
-  )
+  await tracedComplete(resolveTarget(config), { user: "ping", json: false }, 0, config.onCall)
 }
 
 export async function scoreJobs(
@@ -338,37 +505,24 @@ export async function scoreJobs(
   if (!config.apiKey) return jobs.map(localScore)
   if (jobs.length === 0) return []
 
-  const model = config.model?.trim() || DEFAULT_MODEL
-  const body = await tracedGenerate(
-    config.apiKey,
-    model,
-    {
-      systemInstruction: { parts: [{ text: scoringSystemPrompt(profile) }] },
-      contents: [{ role: "user", parts: [{ text: renderJobs(jobs) }] }],
-      generationConfig: {
-        temperature: 0,
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-        thinkingConfig: { thinkingLevel: config.thinkingLevel ?? DEFAULT_THINKING_LEVEL },
-      },
-    },
+  const target = resolveTarget({ ...config, apiKey: config.apiKey })
+  const name = PROVIDER_NAMES[target.provider]
+  const system = scoringSystemPrompt(profile) + (target.provider === "gemini" ? "" : CHAT_JSON_HINT)
+  const result = await tracedComplete(
+    target,
+    { system, user: renderJobs(jobs), json: true },
     jobs.length,
     config.onCall,
   )
-
-  const text = (body.candidates?.[0]?.content?.parts ?? [])
-    .map((part) => part.text ?? "")
-    .join("")
-    .trim()
-  if (!text) throw new Error("Gemini returned an empty response")
+  if (!result.text) throw new Error(`${name} returned an empty response`)
 
   let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    parsed = JSON.parse(extractJson(result.text))
   } catch {
-    throw new Error("Gemini returned malformed JSON")
+    throw new Error(`${name} returned malformed JSON`)
   }
-  return normalise(parsed)
+  return normalise(parsed, name)
 }
 
 export async function scoreInBatches(
@@ -385,7 +539,7 @@ export async function scoreInBatches(
     } catch (error) {
       // A 524 on one chunk used to failCycle the whole run. Leave these jobs
       // unscored; the next scoring hop picks them up.
-      if (!isRetryableGemini(error)) throw error
+      if (!isRetryableModelError(error)) throw error
       skipped += chunk.length
     }
   }

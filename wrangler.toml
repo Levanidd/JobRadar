@@ -25,6 +25,7 @@ ENVIRONMENT = "development"
 # ADMIN_TOKEN
 # GEMINI_API_KEY
 # GEMINI_MODEL           (optional, defaults to gemini-3.7-flash)
+# NEBIUS_API_KEY         (optional, Nebius Token Factory; "CHANGE_ME" counts as unset)
 # TELEGRAM_BOT_TOKEN
 # TELEGRAM_CHAT_ID
 # ADZUNA_APP_ID          (optional)

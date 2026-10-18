@@ -142,11 +142,26 @@ export type ThinkingLevel = "LOW" | "MEDIUM" | "HIGH"
 
 export type ModelOption = { id: string; label: string }
 
+export type ScoringProvider = "gemini" | "nebius"
+
+export type ModelSource = "database" | "secret" | "default"
+
+export type ProviderSettings = {
+  id: ScoringProvider
+  label: string
+  key_name: string
+  key_configured: boolean
+  model: string
+  source: ModelSource
+}
+
 export type Settings = {
+  provider: ScoringProvider
   model: string
   thinking_level: ThinkingLevel
-  source: "database" | "secret" | "default"
+  source: ModelSource
   key_configured: boolean
+  providers: ProviderSettings[]
 }
 
 export type PrefilterRules = {

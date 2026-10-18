@@ -186,6 +186,8 @@ Guard из третьей строки обязателен: без него о�
 
 **Скоринг.** Gemini, модель из секрета `GEMINI_MODEL` (по умолчанию `gemini-3.7-flash`), батчи по 10, **через structured output, а не «верни JSON»**: `generationConfig.responseSchema` со схемой `{external_id, score: 0-100, reason, flags[]}` и `responseMimeType: application/json`. Схема гарантирует форму ответа и убирает парсинг фенсов. Системный промпт (`systemInstruction`) содержит `profile.content` из БД.
 
+Альтернативный ресурс — Nebius Token Factory (`https://api.tokenfactory.nebius.com/v1`, ключ `NEBIUS_API_KEY`). Ресурс и модель для каждого ресурса мастер выбирает в настройках (`scoring_provider`, `gemini_model`, `nebius_model` в таблице `settings`). Запрос идёт в `chat/completions` со строгой `response_format: json_schema`; если модель схему не поддерживает, повтор с `json_object`. Блок `<think>` и код-фенсы reasoning-моделей отрезаются перед разбором.
+
 Критерии в промпте: уровень (senior/lead — плюс, junior/intern — ноль); домен (fintech, payments, banking, deposits — плюс); AI/ML-продукт — плюс; требование немецкого C1 — сильный минус; локация Berlin или Germany-remote — плюс, US-only — ноль. Флаги: `german_required`, `not_senior`, `relocation_only`, `agency_posting`.
 
 Порог уведомления: watchlist — 55, discovery — 70. Discovery шумнее, порог выше.
@@ -275,8 +277,10 @@ alwaysApply: true
   Логику источника не хардкодить в ingest.ts.
 - К каждому адаптеру — фикстура РЕАЛЬНОГО ответа в test/fixtures/ (сохранённая curl'ом, не выдуманная)
   и тест парсинга.
-- Вызовы LLM только в src/scoring.ts: Gemini generateContent со structured output (responseSchema).
-  Модель и ключ берутся из секретов GEMINI_MODEL и GEMINI_API_KEY, в код не хардкодятся.
+- Вызовы LLM только в src/scoring.ts: Gemini generateContent со structured output (responseSchema)
+  или Nebius Token Factory (OpenAI-совместимый chat/completions с response_format json_schema).
+  Ресурс и модель выбираются в настройках (таблица settings), ключи — только секреты
+  GEMINI_API_KEY и NEBIUS_API_KEY, в код не хардкодятся.
 - Секреты только через env-биндинги, никаких ключей в коде, тестах и фикстурах.
 - Ошибка одного источника не прерывает прогон остальных.
 - Перед предложением деплоя запускай npm test.

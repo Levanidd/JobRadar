@@ -92,6 +92,7 @@ export type Bindings = {
   ADMIN_TOKEN: string
   GEMINI_API_KEY?: string
   GEMINI_MODEL?: string
+  NEBIUS_API_KEY?: string
   TELEGRAM_BOT_TOKEN?: string
   TELEGRAM_CHAT_ID?: string
   ADZUNA_APP_ID?: string
