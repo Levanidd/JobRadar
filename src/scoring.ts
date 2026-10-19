@@ -217,20 +217,18 @@ type Completion = { text: string; input: number; output: number; thought: number
 
 type Target = { provider: ScoringProvider; apiKey: string; model: string; thinkingLevel: ThinkingLevel }
 
-function renderJobs(jobs: ScoreInput[]): string {
+function renderJobs(jobs: ScoreInput[], clip: boolean): string {
   return jobs
     .map(
       (job) =>
-        `external_id: ${job.external_id}\n${job.title} @ ${job.company} (${job.location})\n${clipDescription(job.description) ?? ""}`,
+        `external_id: ${job.external_id}\n${job.title} @ ${job.company} (${job.location})\n${(clip ? clipDescription(job.description) : job.description) ?? ""}`,
     )
     .join("\n\n---\n\n")
 }
 
 /** The schema constrains shape but not values, so scores still get clamped here. */
-function normalise(raw: unknown, name: string): ScoreOutput[] {
-  if (!raw || typeof raw !== "object" || !Array.isArray((raw as { scores?: unknown }).scores)) {
-    throw new Error(`${name} returned no scores array`)
-  }
+function normalise(raw: unknown): ScoreOutput[] | null {
+  if (!raw || typeof raw !== "object" || !Array.isArray((raw as { scores?: unknown }).scores)) return null
   const scores = (raw as { scores: unknown[] }).scores
   return scores.flatMap((entry) => {
     if (!entry || typeof entry !== "object") return []
@@ -256,9 +254,31 @@ function extractJson(text: string): string {
   return start >= 0 && end > start ? visible.slice(start, end + 1) : visible
 }
 
+export type ScoringErrorCode =
+  | "malformed_json"
+  | "missing_score"
+  | "empty"
+  | "http_429"
+  | "http_5xx"
+  | "http_4xx"
+  | "timeout"
+  | "error"
+
+/** A reply that arrived but could not be used; `text` keeps what the model actually said. */
+export class ScoringError extends Error {
+  constructor(
+    message: string,
+    readonly code: ScoringErrorCode,
+    readonly text = "",
+  ) {
+    super(message)
+  }
+}
+
 const THINKING_UNSUPPORTED = /thinking level/i
 const SCHEMA_UNSUPPORTED = /response_format|json_schema|guided|schema/i
 const RETRYABLE_STATUS = /(Gemini|Nebius) call failed: (429|5\d\d)\b/
+const CALL_STATUS = /(?:Gemini|Nebius) call failed: (\d{3})\b/
 const RETRIES = 2
 const RETRY_WAIT_MS = [800, 1600]
 const PING_MAX_TOKENS = 16
@@ -267,6 +287,14 @@ const PING_MAX_TOKENS = 16
 export function isRetryableModelError(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error)
   return RETRYABLE_STATUS.test(text)
+}
+
+export function scoringErrorCode(error: unknown): ScoringErrorCode {
+  if (error instanceof ScoringError) return error.code
+  const status = CALL_STATUS.exec(error instanceof Error ? error.message : String(error))?.[1]
+  if (!status) return "error"
+  if (status === "429") return "http_429"
+  return status.startsWith("5") ? "http_5xx" : "http_4xx"
 }
 
 function wait(ms: number): Promise<void> {
@@ -420,7 +448,8 @@ function resolveTarget(config: ScoringConfig & { apiKey: string }): Target {
   }
 }
 
-export type ModelOption = { id: string; label: string }
+/** Prices are dollars per million tokens; only Nebius publishes them through its API. */
+export type ModelOption = { id: string; label: string; price_in_per_m?: number; price_out_per_m?: number }
 
 const MODEL_ALIASES = new Set(["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest"])
 const NON_SCORING = /tts|image|transcribe|omni|robotics|customtools|research|nano-banana|lyria|embedding|computer/
@@ -460,10 +489,10 @@ type NebiusModelsResponse = {
 }
 
 /** Pricing comes per token; the UI shows dollars per million, like the Token Factory model cards. */
-function perMillion(price: string | undefined): string | null {
+function perMillion(price: string | undefined): number | null {
   if (!price) return null
   const value = Number(price)
-  return Number.isFinite(value) ? `$${(value * 1_000_000).toFixed(2)}` : null
+  return Number.isFinite(value) ? Number((value * 1_000_000).toFixed(6)) : null
 }
 
 async function listNebiusModels(apiKey: string): Promise<ModelOption[]> {
@@ -480,8 +509,14 @@ async function listNebiusModels(apiKey: string): Promise<ModelOption[]> {
     .map((model) => {
       const input = perMillion(model.pricing?.prompt)
       const output = perMillion(model.pricing?.completion)
-      const price = input && output ? ` · ${input} / ${output} за 1M` : ""
-      return { id: model.id!, label: `${model.name || model.id}${price}` }
+      const label = model.name || model.id!
+      if (input === null || output === null) return { id: model.id!, label }
+      return {
+        id: model.id!,
+        label: `${label} · $${input.toFixed(2)} / $${output.toFixed(2)} за 1M`,
+        price_in_per_m: input,
+        price_out_per_m: output,
+      }
     })
     .sort((a, b) => a.id.localeCompare(b.id))
 }
@@ -506,23 +541,51 @@ export async function scoreJobs(
   if (jobs.length === 0) return []
 
   const target = resolveTarget({ ...config, apiKey: config.apiKey })
+  return (await requestScores(target, scoringSystemPrompt(profile), jobs, true, config.onCall)).scores
+}
+
+/** The request production batches and the lab share, so the lab measures what runs in production. */
+async function requestScores(
+  target: Target,
+  systemPrompt: string,
+  jobs: ScoreInput[],
+  clip: boolean,
+  onCall?: (call: ModelCall) => void,
+): Promise<{ scores: ScoreOutput[]; text: string }> {
   const name = PROVIDER_NAMES[target.provider]
-  const system = scoringSystemPrompt(profile) + (target.provider === "gemini" ? "" : CHAT_JSON_HINT)
-  const result = await tracedComplete(
-    target,
-    { system, user: renderJobs(jobs), json: true },
-    jobs.length,
-    config.onCall,
-  )
-  if (!result.text) throw new Error(`${name} returned an empty response`)
+  const system = systemPrompt + (target.provider === "gemini" ? "" : CHAT_JSON_HINT)
+  const result = await tracedComplete(target, { system, user: renderJobs(jobs, clip), json: true }, jobs.length, onCall)
+  if (!result.text) throw new ScoringError(`${name} returned an empty response`, "empty")
 
   let parsed: unknown
   try {
     parsed = JSON.parse(extractJson(result.text))
   } catch {
-    throw new Error(`${name} returned malformed JSON`)
+    throw new ScoringError(`${name} returned malformed JSON`, "malformed_json", result.text)
   }
-  return normalise(parsed, name)
+  const scores = normalise(parsed)
+  if (!scores) throw new ScoringError(`${name} returned no scores array`, "malformed_json", result.text)
+  return { scores, text: result.text }
+}
+
+/**
+ * One posting in its own request, for the lab: in a batch a score also depends
+ * on the neighbours, which would blur run-to-run variance. The description must
+ * already be clipped — clipping twice is not a no-op once entities are decoded.
+ * Throws ScoringError with the raw reply when it cannot be used.
+ */
+export async function scoreOne(
+  job: ScoreInput,
+  systemPrompt: string,
+  config: ScoringConfig & { apiKey: string },
+): Promise<{ score: ScoreOutput; text: string }> {
+  const target = resolveTarget(config)
+  const { scores, text } = await requestScores(target, systemPrompt, [job], false, config.onCall)
+  const score = scores.find((item) => item.external_id === job.external_id)
+  if (!score) {
+    throw new ScoringError(`${PROVIDER_NAMES[target.provider]} returned no score for this job`, "missing_score", text)
+  }
+  return { score, text }
 }
 
 export async function scoreInBatches(

@@ -2,7 +2,7 @@ import { runBatch } from "./db"
 import type { ModelCall, ScoringConfig } from "./scoring"
 import type { Bindings } from "./types"
 
-export type BatchKind = "cycle" | "score" | "source" | "rescore" | "job" | "check"
+export type BatchKind = "cycle" | "score" | "source" | "rescore" | "job" | "check" | "lab"
 
 export type UsageContext = {
   kind: BatchKind
@@ -10,6 +10,17 @@ export type UsageContext = {
   trigger: "manual" | "auto"
   /** A cycle scores one user over many hops; they all land in the same batch. */
   runId?: number | null
+  /** A lab run keeps the batch it opened and adds every later hop to it. */
+  batchId?: number | null
+}
+
+const ADD_TO_BATCH = `started_at = MIN(started_at, ?), finished_at = MAX(finished_at, ?), model = ?,
+  requests = requests + ?, jobs = jobs + ?, failed = failed + ?, duration_ms = duration_ms + ?,
+  input_tokens = input_tokens + ?, output_tokens = output_tokens + ?`
+
+function totalsBinds(calls: ModelCall[]): Array<string | number> {
+  const sum = totals(calls)
+  return [sum.started, sum.finished, sum.model, calls.length, sum.jobs, sum.failed, sum.duration, sum.input, sum.output]
 }
 
 function totals(calls: ModelCall[]) {
@@ -27,28 +38,17 @@ function totals(calls: ModelCall[]) {
 
 async function batchId(env: Bindings, context: UsageContext, calls: ModelCall[]): Promise<number | null> {
   const sum = totals(calls)
+  if (context.batchId) {
+    const existing = await env.DB.prepare(`UPDATE model_batches SET ${ADD_TO_BATCH} WHERE id = ? RETURNING id`)
+      .bind(...totalsBinds(calls), context.batchId)
+      .first<{ id: number }>()
+    if (existing) return existing.id
+  }
   if (context.runId) {
     const existing = await env.DB.prepare(
-      `UPDATE model_batches SET
-         started_at = MIN(started_at, ?), finished_at = MAX(finished_at, ?), model = ?,
-         requests = requests + ?, jobs = jobs + ?, failed = failed + ?, duration_ms = duration_ms + ?,
-         input_tokens = input_tokens + ?, output_tokens = output_tokens + ?
-       WHERE run_id = ? AND user_id IS ?
-       RETURNING id`,
+      `UPDATE model_batches SET ${ADD_TO_BATCH} WHERE run_id = ? AND user_id IS ? RETURNING id`,
     )
-      .bind(
-        sum.started,
-        sum.finished,
-        sum.model,
-        calls.length,
-        sum.jobs,
-        sum.failed,
-        sum.duration,
-        sum.input,
-        sum.output,
-        context.runId,
-        context.userId,
-      )
+      .bind(...totalsBinds(calls), context.runId, context.userId)
       .first<{ id: number }>()
     if (existing) return existing.id
   }
@@ -78,10 +78,11 @@ async function batchId(env: Bindings, context: UsageContext, calls: ModelCall[])
   return created?.id ?? null
 }
 
-export async function recordCalls(env: Bindings, context: UsageContext, calls: ModelCall[]): Promise<void> {
-  if (calls.length === 0) return
+/** Returns the batch the calls went into, so a caller spanning many hops can keep adding to it. */
+export async function recordCalls(env: Bindings, context: UsageContext, calls: ModelCall[]): Promise<number | null> {
+  if (calls.length === 0) return context.batchId ?? null
   const id = await batchId(env, context, calls)
-  if (!id) return
+  if (!id) return null
   await runBatch(
     env,
     calls.map((call) =>
@@ -105,6 +106,7 @@ export async function recordCalls(env: Bindings, context: UsageContext, calls: M
       ),
     ),
   )
+  return id
 }
 
 /**

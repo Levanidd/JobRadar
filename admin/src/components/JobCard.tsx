@@ -226,7 +226,7 @@ export const STATUS_LABELS: Record<JobStatus, string> = {
   off_profile: "Вне профиля",
 }
 
-const STATUS_TONE: Partial<Record<JobStatus, string>> = {
+export const STATUS_TONE: Partial<Record<JobStatus, string>> = {
   applied: "badge-accent",
   interview: "badge-positive",
   rejected: "badge-negative",

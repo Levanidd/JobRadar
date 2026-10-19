@@ -177,7 +177,7 @@ function TokenPair({ input, output }: { input: number; output: number }) {
   )
 }
 
-function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (page: number) => void }) {
+export function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (page: number) => void }) {
   if (pages <= 1) return null
   return (
     <div className="row pager">
@@ -280,6 +280,7 @@ const BATCH_KIND: Record<ModelBatchKind, string> = {
   rescore: "Пересчёт профиля",
   job: "Оценка вакансий",
   check: "Проверка модели",
+  lab: "Лаборатория",
 }
 
 function Actor({ batch }: { batch: ModelBatch }) {
@@ -341,7 +342,7 @@ function BatchDialog({ id, onClose }: { id: number; onClose: () => void }) {
                 <Actor batch={batch} />
               </dd>
               <dt>Модель</dt>
-              <dd>{batch.model ?? "—"}</dd>
+              <dd>{batch.kind === "lab" ? "разные — в таблице ниже" : (batch.model ?? "—")}</dd>
               <dt>Начало</dt>
               <dd>{clock(batch.started_at)}</dd>
               <dt>Завершение</dt>
@@ -366,6 +367,7 @@ function BatchDialog({ id, onClose }: { id: number; onClose: () => void }) {
                 <thead>
                   <tr>
                     <th>#</th>
+                    {batch.kind === "lab" ? <th>Модель</th> : null}
                     <th>Начало</th>
                     <th>Длительность</th>
                     <th>Вакансий</th>
@@ -379,6 +381,7 @@ function BatchDialog({ id, onClose }: { id: number; onClose: () => void }) {
                   {detail.requests.map((request, index) => (
                     <tr key={request.id}>
                       <td>{index + 1}</td>
+                      {batch.kind === "lab" ? <td className="muted">{request.model}</td> : null}
                       <td>{parseDate(request.started_at)?.toLocaleTimeString("ru-RU") ?? "—"}</td>
                       <td>{seconds(request.duration_ms)}</td>
                       <td>{request.jobs}</td>
@@ -474,7 +477,7 @@ export function ModelUsageLog() {
                   <td>
                     <TokenPair input={batch.input_tokens} output={batch.output_tokens} />
                   </td>
-                  <td className="muted">{batch.model ?? "—"}</td>
+                  <td className="muted">{batch.kind === "lab" ? "несколько — см. подробности" : (batch.model ?? "—")}</td>
                 </tr>
               ))}
             </tbody>

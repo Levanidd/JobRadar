@@ -140,7 +140,8 @@ export type DetectResult = {
 
 export type ThinkingLevel = "LOW" | "MEDIUM" | "HIGH"
 
-export type ModelOption = { id: string; label: string }
+/** Prices are dollars per million tokens; only Nebius publishes them. */
+export type ModelOption = { id: string; label: string; price_in_per_m?: number; price_out_per_m?: number }
 
 export type ScoringProvider = "gemini" | "nebius"
 
@@ -252,7 +253,7 @@ export type CycleRunEntry = {
   output_tokens: number
 }
 
-export type ModelBatchKind = "cycle" | "score" | "source" | "rescore" | "job" | "check"
+export type ModelBatchKind = "cycle" | "score" | "source" | "rescore" | "job" | "check" | "lab"
 
 export type ModelBatch = {
   id: number
@@ -303,4 +304,192 @@ export type CycleRunLog = {
   total: number
   page: number
   page_size: number
+}
+
+// ---------- model lab ----------
+
+export type LabStatus = "queued" | "running" | "done" | "error" | "cancelled"
+
+export type LabStratum = "0-39" | "40-69" | "70-100" | "labeled"
+
+export type LabSampleMode = "stratified" | "random"
+
+export type LabRun = {
+  id: number
+  name: string
+  status: LabStatus
+  user_id: number
+  user_name: string | null
+  created_by: number
+  sample_mode: LabSampleMode
+  include_labeled: boolean
+  sample_size: number
+  repeats: number
+  seed: number
+  cloned_from: number | null
+  prompt_hash: string
+  /** The production model when the run was created: the likely, not certain, author of the baseline. */
+  baseline_model: string | null
+  total: number
+  done: number
+  failed: number
+  error: string | null
+  created_at: string
+  started_at: string | null
+  updated_at: string | null
+  finished_at: string | null
+  /** Live, but nothing has moved for a while; a tick restarts it. */
+  stale: boolean
+}
+
+export type LabCandidate = {
+  id: number
+  position: number
+  provider: ScoringProvider
+  model: string
+  thinking_level: ThinkingLevel | null
+  price_in_per_m: number | null
+  price_out_per_m: number | null
+}
+
+export type LabRunListItem = LabRun & {
+  jobs: number
+  candidates: Array<
+    Pick<LabCandidate, "id" | "provider" | "model" | "thinking_level" | "price_in_per_m" | "price_out_per_m">
+  >
+  cost_usd: number | null
+  /** At least one model had no price, so the cost leaves it out. */
+  cost_partial: boolean
+}
+
+export type LabRunList = {
+  runs: LabRunListItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type LabJob = {
+  job_id: string
+  position: number
+  stratum: LabStratum | null
+  title: string
+  company: string
+  location: string | null
+  url: string | null
+  baseline_score: number | null
+  baseline_reason: string | null
+  baseline_flags: string | null
+  baseline_status: JobStatus | null
+}
+
+export type LabTrialStatus = "pending" | "running" | "ok" | "failed" | "cancelled"
+
+export type LabTrial = {
+  id: number
+  candidate_id: number
+  job_id: string
+  repeat_no: number
+  exec_order: number
+  status: LabTrialStatus
+  score: number | null
+  reason: string | null
+  flags: string | null
+  error_code: string | null
+  error: string | null
+  attempts: number
+  input_tokens: number | null
+  output_tokens: number | null
+  thought_tokens: number | null
+  duration_ms: number | null
+}
+
+export type LabCell = {
+  candidate_id: number
+  job_id: string
+  scores: number[]
+  mean: number | null
+  spread: number | null
+  delta: number | null
+  flip: boolean
+  agree: boolean | null
+  unstable_flags: string[]
+  n_ok: number
+  n_failed: number
+  n_waiting: number
+}
+
+export type LabSummary = {
+  candidate_id: number
+  n_ok: number
+  n_failed: number
+  mae: number | null
+  stability_sd: number | null
+  flip_rate: number | null
+  agreement70: number | null
+  labeled_recall: number | null
+  german_flag_match: number | null
+  p50_ms: number | null
+  p95_ms: number | null
+  avg_in: number | null
+  avg_out: number | null
+  avg_thought: number | null
+  cost_usd: number | null
+  cost_per_job_usd: number | null
+  monthly_usd: number | null
+  n: {
+    mae: number
+    stability: number
+    flip: number
+    agreement: number
+    labeled: number
+    german: number
+    latency: number
+    tokens: number
+  }
+}
+
+export type LabRunDetail = {
+  run: LabRun
+  candidates: LabCandidate[]
+  jobs: LabJob[]
+  trials: LabTrial[]
+  cells: LabCell[]
+  summary: LabSummary[]
+  cycle_running: boolean
+}
+
+export type LabJobDetail = {
+  job: LabJob & { description: string }
+  trials: Array<{ id: number; raw_response: string | null }>
+}
+
+export type LabPreview = {
+  pool_size: number
+  by_stratum: Record<LabStratum, number>
+  sample_size: number
+  trials: number
+  est_cost_usd: number | null
+  warnings: string[]
+  /** Why a launch would be refused right now; the form keeps its button off. */
+  error: string | null
+}
+
+export type LabCandidateInput = {
+  provider: ScoringProvider
+  model: string
+  thinking_level?: ThinkingLevel | null
+  price_in_per_m?: number | null
+  price_out_per_m?: number | null
+}
+
+export type LabRunInput = {
+  name?: string
+  user_id: number
+  sample_size: number
+  sample_mode: LabSampleMode
+  include_labeled: boolean
+  repeats: number
+  seed: number
+  candidates: LabCandidateInput[]
 }

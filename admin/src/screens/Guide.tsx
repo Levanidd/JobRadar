@@ -314,6 +314,60 @@ export function Guide() {
           </div>
         </Shot>
       </section>
+
+      {master ? (
+        <section className="card">
+          <h3 className="card-title">7. Сравнить модели в «Лаборатории»</h3>
+          <p className="card-sub">
+            Перед сменой модели скоринга. Лаборатория берёт уже оценённые вакансии выбранного профиля, прогоняет каждую
+            через несколько моделей (до 6) по 1–5 раз и кладёт ответы рядом с оценкой из базы. Вакансии, оценки и
+            настройки не меняются; расход виден в «Настройках» → «Запросы к модели» одним пакетом «Лаборатория».
+          </p>
+          <Shot
+            legend={[
+              "Baseline — оценка текущего скорера из базы. Это не истина, а точка отсчёта",
+              "Скоры повторов одной модели. Разные числа — модель нестабильна на этой вакансии",
+              "Δ — среднее модели минус baseline; ⚠ flip — повторы по разные стороны порога 70",
+              "Фильтры: только расхождения, только ошибки, только размеченные вами вакансии",
+            ]}
+          >
+            <div className="guide-stack">
+              <div className="guide-row">
+                <Hit n={4}>
+                  <span className="guide-pills">
+                    <span className="guide-pill is-on">Только расхождения</span>
+                    <span className="guide-pill">Только с ошибками</span>
+                  </span>
+                </Hit>
+              </div>
+              <div className="guide-source-row">
+                <strong>Senior Product Manager</strong>
+                <Hit n={1}>
+                  <span className="lab-baseline-score">78</span>
+                </Hit>
+                <Hit n={2}>
+                  <span className="lab-scores">
+                    <span className="lab-score">55</span>
+                    <span className="lab-score">74</span>
+                    <span className="lab-score">60</span>
+                  </span>
+                </Hit>
+                <Hit n={3}>
+                  <span className="lab-cell-meta">
+                    <span className="lab-delta is-far">Δ −15</span>
+                    <span className="lab-warn">⚠ flip</span>
+                  </span>
+                </Hit>
+              </div>
+            </div>
+          </Shot>
+          <p className="card-sub">
+            Начните с 10 вакансий, 3–4 моделей и 3 повторов. Модель лучше текущей, если у неё низкие MAE и SD, flip
+            около нуля и высокий recall на размеченных — при приемлемой цене за вакансию. «Клонировать» прогоняет те
+            же вакансии с тем же снапшотом профиля через другой набор моделей.
+          </p>
+        </section>
+      ) : null}
     </div>
   )
 }

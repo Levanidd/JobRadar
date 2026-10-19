@@ -10,6 +10,13 @@ import type {
   InterviewStage,
   Job,
   JobStatus,
+  LabCandidateInput,
+  LabJobDetail,
+  LabPreview,
+  LabRun,
+  LabRunDetail,
+  LabRunInput,
+  LabRunList,
   ModelBatchDetail,
   ModelBatchLog,
   ModelOption,
@@ -33,6 +40,17 @@ let token = sessionStorage.getItem(STORAGE_KEY) ?? ""
 export class UnauthorizedError extends Error {
   constructor() {
     super("Неверный токен")
+  }
+}
+
+/** Keeps the response body, for screens that show more of an error than its text. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly payload: unknown,
+  ) {
+    super(message)
   }
 }
 
@@ -64,7 +82,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       payload && typeof payload === "object" && "error" in payload
         ? String((payload as { error: unknown }).error)
         : `Ошибка ${res.status}`
-    throw new Error(message)
+    throw new ApiError(message, res.status, payload)
   }
   return payload as T
 }
@@ -432,5 +450,63 @@ export const api = {
     thinking_level?: ThinkingLevel
   }): Promise<Settings> {
     return request("/settings", { method: "PUT", body: JSON.stringify(body) })
+  },
+
+  labPreview(
+    body: Partial<LabRunInput> & { clone_from?: number; candidates: LabCandidateInput[] },
+  ): Promise<LabPreview> {
+    return post("/lab/preview", body)
+  },
+
+  labRuns(page: number): Promise<LabRunList> {
+    return request(`/lab/runs?page=${page}`)
+  },
+
+  createLabRun(body: LabRunInput): Promise<{ run: LabRun; warnings: string[] }> {
+    return post("/lab/runs", body)
+  },
+
+  cloneLabRun(
+    id: number,
+    body: { name?: string; repeats: number; candidates: LabCandidateInput[] },
+  ): Promise<{ run: LabRun; warnings: string[] }> {
+    return post(`/lab/runs/${id}/clone`, body)
+  },
+
+  labRun(id: number): Promise<LabRunDetail> {
+    return request(`/lab/runs/${id}`)
+  },
+
+  labJob(id: number, jobId: string): Promise<LabJobDetail> {
+    return request(`/lab/runs/${id}/jobs/${encodeURIComponent(jobId)}`)
+  },
+
+  labTick(id: number): Promise<{ ok: true; more: boolean; kicked: boolean }> {
+    return post(`/lab/runs/${id}/tick`)
+  },
+
+  cancelLabRun(id: number): Promise<{ run: LabRun }> {
+    return post(`/lab/runs/${id}/cancel`)
+  },
+
+  retryLabRun(id: number, trialIds?: number[]): Promise<{ run: LabRun }> {
+    return post(`/lab/runs/${id}/retry`, trialIds ? { trial_ids: trialIds } : {})
+  },
+
+  deleteLabRun(id: number): Promise<{ ok: true }> {
+    return request(`/lab/runs/${id}`, { method: "DELETE" })
+  },
+
+  /** The export needs the auth header, so it is fetched and handed to the browser as a file. */
+  async downloadLabCsv(id: number): Promise<void> {
+    const res = await fetch(`/api/lab/runs/${id}/export.csv`, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.status === 401) throw new UnauthorizedError()
+    if (!res.ok) throw new Error(`Ошибка ${res.status}`)
+    const url = URL.createObjectURL(await res.blob())
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `lab-run-${id}.csv`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   },
 }

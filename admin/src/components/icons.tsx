@@ -147,6 +147,16 @@ export function PlusIcon({ className }: IconProps) {
   )
 }
 
+export function FlaskIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M9 3h6" />
+      <path d="M10 3v6.2l-5.2 9A1.9 1.9 0 0 0 6.5 21h11a1.9 1.9 0 0 0 1.7-2.8l-5.2-9V3" />
+      <path d="M7.3 15h9.4" />
+    </svg>
+  )
+}
+
 export function BookIcon({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

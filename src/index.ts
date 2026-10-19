@@ -2,10 +2,12 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 
 import { resumeStuckCycle } from "./cycle"
-import { message } from "./errors"
+import { D1_LIMIT_MESSAGE, isD1LimitError, message } from "./errors"
+import { resumeStuckLab } from "./lab"
 import { maybeAutoRun } from "./schedule"
 import { discovery } from "./routes/discovery"
 import { jobs } from "./routes/jobs"
+import { lab } from "./routes/lab"
 import { profile } from "./routes/profile"
 import { run } from "./routes/run"
 import { sources } from "./routes/sources"
@@ -40,6 +42,7 @@ app.route("/", jobs)
 app.route("/", stats)
 app.route("/", profile)
 app.route("/", run)
+app.route("/", lab)
 
 app.get("/", (c) =>
   c.json({
@@ -53,15 +56,7 @@ app.all("*", (c) => c.json({ error: "not found" }, 404))
 
 app.onError((err, c) => {
   const detail = message(err)
-  if (/row read limit|exceeded D1/i.test(detail)) {
-    return c.json(
-      {
-        error:
-          "D1 исчерпала дневной лимит чтения. Данные на месте — снова заработает после полуночи UTC (02:00). Пока не запускай прогон.",
-      },
-      503,
-    )
-  }
+  if (isD1LimitError(detail)) return c.json({ error: D1_LIMIT_MESSAGE }, 503)
   return c.json({ error: detail }, 500)
 })
 
@@ -69,5 +64,6 @@ export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: AppEnv["Bindings"], ctx: ExecutionContext) {
     ctx.waitUntil(resumeStuckCycle(env).then(() => maybeAutoRun(env)))
+    ctx.waitUntil(resumeStuckLab(env))
   },
 }

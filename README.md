@@ -45,7 +45,7 @@ A run starts from the admin **Run** button (`POST /api/run`) or from the master'
 
 React + Vite in `admin/`, built to `admin/dist`, served through the Worker assets binding. Static files win only when they exist, so `/api/*` still hits the Worker.
 
-Tabs: Resources (Discovery, Explore, Sources), Jobs, Applied, Stats, Profile, Settings (master only), Guide.
+Tabs: Resources (Discovery, Explore, Sources), Jobs, Applied, Stats, Profile, Settings (master only), Lab (master only), Guide.
 
 Sign-in is a personal token. The first login with `ADMIN_TOKEN` creates the master; everyone else gets a token from Settings → Users. The token lives in `sessionStorage` for that tab. The master can view and rotate issued tokens. Their own `ADMIN_TOKEN` login cannot be shown, because that secret is not stored in the database.
 
@@ -109,6 +109,15 @@ The first login with `ADMIN_TOKEN`, while `users` is empty, creates the master a
 | GET/PUT | `/api/settings` | scoring provider, model, thinking level — master only |
 | GET | `/api/models?provider=gemini\|nebius` | models available for the provider's key |
 | GET | `/api/runs` | last 50 source runs |
+| POST | `/api/lab/preview` | pool size, sample size, trial count and cost estimate for a draft lab run (master) |
+| GET/POST | `/api/lab/runs` | lab run history, 10 per page / create and start a run (master) |
+| GET/DELETE | `/api/lab/runs/:id` | run with candidates, postings, trials, matrix cells and per-model summary / delete a finished run (master) |
+| GET | `/api/lab/runs/:id/jobs/:jobId` | the clipped description a model saw and raw responses (master) |
+| POST | `/api/lab/runs/:id/tick` | restart a stalled run from the open tab (master) |
+| POST | `/api/lab/runs/:id/cancel` | stop queued trials; in-flight ones finish (master) |
+| POST | `/api/lab/runs/:id/retry` | requeue failed trials; `{trial_ids:[]}` for specific ones (master) |
+| POST | `/api/lab/runs/:id/clone` | same postings and profile snapshot, new models or repeats (master) |
+| GET | `/api/lab/runs/:id/export.csv` | one row per trial, UTF-8 with BOM (master) |
 | POST | `/api/mcp` | MCP for Claude and Cursor: read-only SQL. Tools `schema` and `query` (one SELECT) |
 
 Routes live by domain in `src/routes/`. `src/index.ts` only assembles the app, checks the token, and catches errors.
@@ -131,6 +140,16 @@ Claude Code: `claude mcp add --transport http jobradar https://<worker>/api/mcp 
 In Cursor, put the same JSON in MCP settings. Do not commit the token.
 
 The first run of a source with `bootstrapped=0` does not send notifications (cold start).
+
+## Model Lab
+
+Lab compares scoring models before the production one is switched. It samples up to 30 postings that already have a score for one user, either evenly from 0–39 / 40–69 / 70–100 or at random, optionally with up to 30% from postings that user applied to, interviewed for, saved, or rejected. A seed makes the sample reproducible on the same pool. Each posting goes to up to 6 candidate models (Gemini or Nebius, Gemini with a thinking level) 1–5 times, at most 300 trials per run, with the same system prompt and clipping as production. The profile and prompt are snapshotted at creation, so a clone replays the same input through other models.
+
+Lab only writes `lab_runs`, `lab_candidates`, `lab_jobs`, `lab_trials` and the model usage log. It never touches `jobs`, `user_jobs`, `sources`, `discovered_companies` or `settings`. Usage shows up in Settings → Model requests as one batch of kind `lab` per run. API keys never reach trials, the usage log, or responses.
+
+Trials run 4 at a time in `waitUntil` hops of up to 25 seconds. A hop claims the run with a compare-and-swap on `lab_runs.hops`, so the tab's tick, a fresh walker, and cron never run it twice. Cron resumes a run that has not moved for 25 seconds. Rate limits, 5xx, and timeouts retry up to 3 attempts; other failures are kept with an error code (`http_4xx`, `malformed_json`, `missing_score`, `empty`, `error`) and can be retried from the run screen.
+
+The run screen compares each model against the stored score ("baseline", the production scorer's answer, not ground truth): MAE, mean SD between repeats, flip rate around 70, agreement with the baseline's ping decision, recall on postings the user applied to, interviewed for, or saved, german-flag match, error share, p50/p95 latency, tokens, run cost, and a monthly forecast at 9,000 postings. The matrix shows every repeat per posting with Δ to baseline and flip/spread warnings; a row opens to the exact description the model saw and the raw responses. Tables come from migration `0030_model_lab.sql`.
 
 ## Secrets
 

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 
 import { api, forgetToken, getToken, UnauthorizedError, type JobFilters } from "./api"
 import { AppProvider, type ToastKind } from "./app-context"
-import { BookIcon, BriefcaseIcon, ChartIcon, CheckIcon, GearIcon, PersonIcon, StackIcon } from "./components/icons"
+import { Empty } from "./components/common"
+import { BookIcon, BriefcaseIcon, ChartIcon, CheckIcon, FlaskIcon, GearIcon, PersonIcon, StackIcon } from "./components/icons"
 import { RunProgress, type RunState } from "./components/RunProgress"
 import { Applied, type PipeFilter } from "./screens/Applied"
 import { Guide } from "./screens/Guide"
 import { Jobs } from "./screens/Jobs"
+import { Lab } from "./screens/Lab"
 import { Profile } from "./screens/Profile"
 import { Resources } from "./screens/Resources"
 import { Settings } from "./screens/Settings"
@@ -14,17 +16,31 @@ import { Stats } from "./screens/Stats"
 import { TokenGate } from "./screens/TokenGate"
 import type { AuthUser, Cycle } from "./types"
 
-type TabId = "resources" | "jobs" | "applied" | "stats" | "profile" | "settings" | "guide"
+type TabId = "resources" | "jobs" | "applied" | "stats" | "profile" | "settings" | "lab" | "guide"
 
-const TABS: Array<{ id: TabId; label: string; icon: ComponentType<{ className?: string }>; master?: boolean }> = [
+const TABS: Array<{
+  id: TabId
+  label: string
+  /** Phones fit eight tabs only if the longest label gives way. */
+  short?: string
+  icon: ComponentType<{ className?: string }>
+  master?: boolean
+}> = [
   { id: "resources", label: "Ресурсы", icon: StackIcon },
   { id: "jobs", label: "Вакансии", icon: BriefcaseIcon },
   { id: "applied", label: "Подался", icon: CheckIcon },
   { id: "stats", label: "Статистика", icon: ChartIcon },
   { id: "profile", label: "Профиль", icon: PersonIcon },
   { id: "settings", label: "Настройки", icon: GearIcon, master: true },
+  { id: "lab", label: "Лаборатория", short: "Лаб", icon: FlaskIcon, master: true },
   { id: "guide", label: "Инструкция", icon: BookIcon },
 ]
+
+/** `#lab/12` opens run 12 of the lab; the part after the slash belongs to the tab. */
+function tabFromHash(): TabId {
+  const id = window.location.hash.slice(1).split("/")[0]
+  return TABS.find((item) => item.id === id)?.id ?? "resources"
+}
 
 type Toast = { message: string; kind: ToastKind }
 
@@ -53,7 +69,7 @@ function doneMessage(cycle: Cycle): string {
 export default function App() {
   const [authorized, setAuthorized] = useState(() => Boolean(getToken()))
   const [me, setMe] = useState<AuthUser | null>(null)
-  const [tab, setTab] = useState<TabId>("resources")
+  const [tab, setTab] = useState<TabId>(tabFromHash)
   // Opening a company from Discovery remounts the job list with its own
   // filters; picking the tab by hand always starts from the default view.
   const [preset, setPreset] = useState<{ filters: JobFilters; seq: number } | null>(null)
@@ -119,6 +135,16 @@ export default function App() {
   )
 
   useEffect(() => () => window.clearTimeout(timer.current), [])
+
+  useEffect(() => {
+    if (window.location.hash.slice(1).split("/")[0] !== tab) window.history.replaceState(null, "", `#${tab}`)
+  }, [tab])
+
+  useEffect(() => {
+    const follow = () => setTab(tabFromHash())
+    window.addEventListener("hashchange", follow)
+    return () => window.removeEventListener("hashchange", follow)
+  }, [])
 
   useEffect(() => {
     if (!authorized) return
@@ -228,7 +254,7 @@ export default function App() {
             return (
               <button
                 key={item.id}
-                className="tab"
+                className={item.short ? "tab has-short" : "tab"}
                 aria-current={tab === item.id ? "page" : undefined}
                 onClick={() => {
                   if (item.id === "jobs") setPreset(null)
@@ -237,7 +263,8 @@ export default function App() {
                 }}
               >
                 <Icon />
-                {item.label}
+                <span className="tab-label">{item.label}</span>
+                {item.short ? <span className="tab-label-short">{item.short}</span> : null}
               </button>
             )
           })}
@@ -265,6 +292,13 @@ export default function App() {
           {tab === "stats" ? <Stats onOpenApplied={openApplied} /> : null}
           {tab === "profile" ? <Profile /> : null}
           {tab === "settings" && me?.role === "master" ? <Settings /> : null}
+          {tab === "lab" && me ? (
+            me.role === "master" ? (
+              <Lab />
+            ) : (
+              <Empty title="Нет доступа" hint="Лаборатория моделей доступна только мастеру" />
+            )
+          ) : null}
           {tab === "guide" ? <Guide /> : null}
         </main>
 

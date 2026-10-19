@@ -138,7 +138,12 @@ describe("Nebius scoring", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     expect(await listModels("nebius", "k")).toEqual([
-      { id: "meta-llama/Llama-3.3-70B-Instruct", label: "Llama 3.3 70B · $0.13 / $0.40 за 1M" },
+      {
+        id: "meta-llama/Llama-3.3-70B-Instruct",
+        label: "Llama 3.3 70B · $0.13 / $0.40 за 1M",
+        price_in_per_m: 0.13,
+        price_out_per_m: 0.4,
+      },
       { id: "Qwen/Qwen2.5-VL-72B-Instruct", label: "Qwen/Qwen2.5-VL-72B-Instruct" },
     ])
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe(`${NEBIUS_BASE_URL}/models?verbose=true`)
