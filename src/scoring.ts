@@ -123,19 +123,10 @@ Allowed flags: ${FLAGS.join(", ")}.`
 export function scoringSystemPrompt(profile: string): string {
   return `You score job postings for a personal job search.
 
-Candidate profile:
+Scoring instructions from the user (the only source of scoring rules):
 ${profile}
 
-Scoring rules:
-- Senior / lead / principal / head of product: plus. Junior / intern / working student: score 0, flag not_senior.
-- Domain fintech, payments, banking, deposits: plus.
-- AI/ML product roles: plus.
-- German C1/C2 or fluent German required: strong minus, flag german_required.
-- Location Berlin or Germany-remote: plus. US-only: score 0, flag relocation_only.
-- Recruiting agencies / staff augmentation: minus, flag agency_posting.
-- Return 0-100. Be calibrated: 70+ is worth a ping, 55+ only for watchlist companies.
-
-Return one entry in "scores" per job, keyed by its external_id. Never invent jobs.`
+Return one entry in "scores" per job, keyed by its external_id, with a score from 0 to 100. Use only the allowed flags. Never invent jobs.`
 }
 
 export function localScore(job: ScoreInput): ScoreOutput {
