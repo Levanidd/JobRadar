@@ -375,8 +375,8 @@ export function LabForm({
 
         <div className="lab-candidates">
           {rows.map((row, index) => {
-            const listed = models[row.provider]?.find((item) => item.id === row.model)
-            const listId = `lab-models-${row.provider}`
+            const catalog = models[row.provider] ?? []
+            const listed = catalog.find((item) => item.id === row.model)
             const provider = providerOptions.find((item) => item.id === row.provider)
             return (
               <div key={row.key} className={`lab-candidate ${rowErrors[row.key] ? "has-error" : ""}`}>
@@ -393,14 +393,23 @@ export function LabForm({
                     </option>
                   ))}
                 </select>
-                <input
-                  className="input lab-candidate-model"
+                <select
+                  className="select lab-candidate-model"
                   aria-label="Модель"
-                  list={listId}
                   value={row.model}
-                  placeholder={provider?.key_configured === false ? `${provider.key_name} не настроен` : "Начните вводить id модели"}
+                  disabled={provider?.key_configured === false || catalog.length === 0}
                   onChange={(event) => updateRow(row.key, { model: event.target.value })}
-                />
+                >
+                  {row.model ? null : <option value="">Выберите модель</option>}
+                  {row.model && !catalog.some((item) => item.id === row.model) ? (
+                    <option value={row.model}>{row.model}</option>
+                  ) : null}
+                  {catalog.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label && item.label !== item.id ? `${item.label} — ${item.id}` : item.id}
+                    </option>
+                  ))}
+                </select>
                 {row.provider === "gemini" ? (
                   <>
                     <select
@@ -459,16 +468,6 @@ export function LabForm({
             )
           })}
         </div>
-
-        {providerOptions.map((provider) => (
-          <datalist key={provider.id} id={`lab-models-${provider.id}`}>
-            {(models[provider.id] ?? []).map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label && item.label !== item.id ? item.label : undefined}
-              </option>
-            ))}
-          </datalist>
-        ))}
 
         <div className="row">
           <button className="btn btn-sm" type="button" disabled={rows.length >= MAX_CANDIDATES} onClick={addRow}>
