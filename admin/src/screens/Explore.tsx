@@ -6,6 +6,7 @@ import { MultiSelect } from "../components/MultiSelect"
 import { RunProgress, type RunState } from "../components/RunProgress"
 import { SortHeader } from "../components/SortHeader"
 import { Count, Empty, ScoreBadge, Skeletons, plural } from "../components/common"
+import { getLang, useT } from "../i18n"
 import type { ExploreBoard, ExploreCompany } from "../types"
 
 const STORAGE_KEY = "jobradar.explore.providers"
@@ -16,6 +17,17 @@ const DEFAULT_DIR: Record<SortKey, "asc" | "desc"> = {
   company: "asc",
   jobs: "desc",
   score: "desc",
+}
+
+/** English has one plural. Russian keeps the three forms the counter already asks for. */
+function countForms(
+  t: (english: string) => string,
+  one: string,
+  few: string,
+  many: string,
+): [string, string, string] {
+  if (getLang() !== "ru") return [one, many, many]
+  return [t(one), t(few), t(many)]
 }
 
 function boardLabel(boards: ExploreBoard[] | null, provider: string): string {
@@ -34,6 +46,7 @@ function readStored(): string[] {
 }
 
 export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: string }) => void }) {
+  const t = useT()
   const run = useAction()
   const { notify, logout, refresh, touchSources, cycleRunning } = useApp()
   const [boards, setBoards] = useState<ExploreBoard[] | null>(null)
@@ -72,9 +85,9 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
       (boards ?? []).map((board) => ({
         value: board.provider,
         label: board.label,
-        hint: board.ready ? String(board.jobs) : "нужен URL доски",
+        hint: board.ready ? String(board.jobs) : t("needs a board URL"),
       })),
-    [boards],
+    [boards, t],
   )
 
   async function loadCompanies(providers: string[]) {
@@ -87,11 +100,11 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
     const ready = selected.filter((provider) => boards?.find((board) => board.provider === provider)?.ready)
     const skipped = selected.length - ready.length
     if (ready.length === 0) {
-      notify("Getro и Consider нужно сначала добавить ссылкой на доску в Источники", "error")
+      notify(t("Add Getro and Consider in Sources with a board link first"), "error")
       return
     }
     if (skipped) {
-      notify("Getro/Consider без URL пропущены — добавьте доску в Источники", "error")
+      notify(t("Getro/Consider without a URL were skipped — add the board in Sources"), "error")
     }
 
     setLaunching(true)
@@ -151,8 +164,8 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
     if (!result) return
     notify(
       result.added
-        ? `${company.company} — отслеживаем через ${result.ats}`
-        : `${company.company}: ATS не определился. Компанию покроют query-источники`,
+        ? t("{company} — tracking via {ats}", { company: company.company, ats: result.ats ?? "" })
+        : t("{company}: ATS was not detected. Query sources will cover this company", { company: company.company }),
       result.added ? "ok" : "error",
     )
     if (result.added) {
@@ -186,8 +199,11 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
       if (added) refresh()
       notify(
         skipped
-          ? `Добавлено ${added}, ATS не определился у ${skipped}`
-          : `Добавлено ${added} ${plural(added, ["компания", "компании", "компаний"])}`,
+          ? t("Added {added}, ATS was not detected for {skipped}", { added, skipped })
+          : t("Added {added} {noun}", {
+              added,
+              noun: plural(added, countForms(t, "company", "a few companies", "companies")),
+            }),
         added ? "ok" : "error",
       )
     } catch (error) {
@@ -237,9 +253,9 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
   return (
     <>
       <p className="muted">
-        Выберите площадки и нажмите «Запустить». Himalayas, Remote OK и остальные подключатся сами. Getro и Consider —
-        доски фондов: их нужно добавить ссылкой в Источники. В обычном списке вакансий по умолчанию спрятаны роли вне
-        профиля — полный набор у компании открывается кнопкой «Вакансии».
+        {t(
+          "Pick the boards and press \"Launch\". Himalayas, Remote OK, and the rest connect on their own. Getro and Consider are fund boards: add them with a link in Sources. Roles that are off profile are hidden from the normal job list — \"Jobs\" opens the full set for a company.",
+        )}
       </p>
 
       <div className="filters">
@@ -251,14 +267,14 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
             checked={refreshBoards}
             onChange={(event) => setRefreshBoards(event.target.checked)}
           />
-          Сначала обновить доски
+          {t("Refresh boards first")}
         </label>
         <button
           className="btn btn-primary btn-sm"
           disabled={selected.length === 0 || launching || cycleRunning || boards === null}
           onClick={() => void launch()}
         >
-          {launching ? "Анализирую…" : "Запустить"}
+          {launching ? t("Analyzing…") : t("Launch")}
         </button>
       </div>
 
@@ -268,18 +284,20 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
         <Skeletons />
       ) : companies === undefined ? (
         <Empty
-          title="Выберите ATS и запустите"
-          hint="Himalayas, Arbeitnow, Remote OK и остальные уже в списке. Getro и Consider появятся как рабочие, когда добавите URL доски в Источники."
+          title={t("Pick an ATS and launch")}
+          hint={t(
+            "Himalayas, Arbeitnow, Remote OK, and the rest are already in the list. Getro and Consider show up as ready once you add a board URL in Sources.",
+          )}
         />
       ) : companies === null ? (
         scan ? null : <Skeletons />
       ) : companies.length === 0 ? (
         <Empty
-          title="Некого добавлять"
+          title={t("Nothing to add")}
           hint={
             refreshBoards
-              ? "Либо доски пустые, либо все найденные компании уже в источниках."
-              : "Доски без вакансий прогоняются при запуске сами. Если список пустой — отметьте «Сначала обновить доски»."
+              ? t("Either the boards are empty, or every company found is already in sources.")
+              : t("Boards without jobs are crawled when you start. If the list is empty, turn on \"Refresh boards first\".")
           }
         />
       ) : (
@@ -287,15 +305,15 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
           <div className="filters">
             <input
               className="input"
-              placeholder="Поиск компании"
+              placeholder={t("Search companies")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
           <div className="row">
-            <Count shown={rows.length} total={companies.length} forms={["компания", "компании", "компаний"]}>
-              {" · "}уже в источниках скрыты
-              {addingAll ? ` · добавляю ${addingAll.done} из ${addingAll.total}` : ""}
+            <Count shown={rows.length} total={companies.length} forms={countForms(t, "company", "a few companies", "companies")}>
+              {t(" · already in sources are hidden")}
+              {addingAll ? t(" · adding {done} of {total}", { done: addingAll.done, total: addingAll.total }) : ""}
             </Count>
             <button
               type="button"
@@ -303,15 +321,15 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
               disabled={Boolean(addingAll || launching || busy || rows.length === 0)}
               onClick={() => void trackAll(rows)}
             >
-              {addingAll ? "Добавляю…" : "Добавить все"}
+              {addingAll ? t("Adding…") : t("Add all")}
             </button>
           </div>
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <SortHeader column="company" label="Компания" sort={sort} dir={dir} onSort={sortBy} />
-                  <SortHeader column="jobs" label="Вакансий" sort={sort} dir={dir} onSort={sortBy} className="col-score" />
+                  <SortHeader column="company" label={t("Company")} sort={sort} dir={dir} onSort={sortBy} />
+                  <SortHeader column="jobs" label={t("Jobs")} sort={sort} dir={dir} onSort={sortBy} className="col-score" />
                   <SortHeader column="score" label="Score" sort={sort} dir={dir} onSort={sortBy} className="col-score" />
                   <th>ATS</th>
                   <th className="col-actions" />
@@ -325,7 +343,7 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
                       {company.sample_url ? (
                         <div className="cell-sub">
                           <a href={company.sample_url} target="_blank" rel="noreferrer">
-                            Вакансия →
+                            {t("Job")} →
                           </a>
                         </div>
                       ) : null}
@@ -347,7 +365,7 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
                       <div className="row">
                         {company.jobs > 0 ? (
                           <button className="btn btn-sm" onClick={() => onOpenJobs(company)}>
-                            Вакансии
+                            {t("Jobs")}
                           </button>
                         ) : null}
                         <button
@@ -355,7 +373,7 @@ export function Explore({ onOpenJobs }: { onOpenJobs: (company: { company_key: s
                           disabled={Boolean(busy || launching || addingAll)}
                           onClick={() => void track(company)}
                         >
-                          Добавить
+                          {t("Add")}
                         </button>
                       </div>
                     </td>

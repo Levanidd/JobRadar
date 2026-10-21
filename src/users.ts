@@ -1,3 +1,4 @@
+import { pick } from "./locale"
 import { DEFAULT_PREFILTER, sanitizeTags } from "./prefilter"
 import {
   SETTING_COMPANY_BLACKLIST,
@@ -90,8 +91,8 @@ export async function bootstrapMaster(env: Bindings, token: string): Promise<Aut
   const count = await env.DB.prepare(`SELECT COUNT(*) AS n FROM users`).first<{ n: number }>()
   if (Number(count?.n) > 0) throw new Error("unauthorized")
   try {
-    const id = await insertMaster(env, "Мастер", await hashToken(token))
-    return { id, name: "Мастер", role: "master" }
+    const id = await insertMaster(env, "Master", await hashToken(token))
+    return { id, name: "Master", role: "master" }
   } catch {
     const raced = await findUserByToken(env, token)
     if (raced) return raced
@@ -127,7 +128,7 @@ export async function createUser(
   name: string,
 ): Promise<{ user: ManagedUser } | { error: string }> {
   const clean = sanitizeUserName(name)
-  if (!clean) return { error: "Нужно имя, до 40 символов" }
+  if (!clean) return { error: pick("A name is required, up to 40 characters", "Нужно имя, до 40 символов") }
   const token = randomToken()
   try {
     const inserted = await env.DB.prepare(`INSERT INTO users (name, role, token_hash, token) VALUES (?, 'user', ?, ?)`)
@@ -142,7 +143,7 @@ export async function createUser(
       .run()
     return { user: { id, name: clean, role: "user", token } }
   } catch {
-    return { error: "Не удалось создать пользователя" }
+    return { error: pick("Couldn't create the user", "Не удалось создать пользователя") }
   }
 }
 
@@ -152,7 +153,7 @@ export async function setUserName(
   name: string,
 ): Promise<{ user: ManagedUser } | { error: string; status: 400 | 404 }> {
   const clean = sanitizeUserName(name)
-  if (!clean) return { error: "Нужно имя, до 40 символов", status: 400 }
+  if (!clean) return { error: pick("A name is required, up to 40 characters", "Нужно имя, до 40 символов"), status: 400 }
   const user = await getUser(env, id)
   if (!user) return { error: "not found", status: 404 }
   await env.DB.prepare(`UPDATE users SET name = ? WHERE id = ?`).bind(clean, id).run()
@@ -168,7 +169,7 @@ export async function setUserRole(
   if (!user) return { error: "not found", status: 404 }
   if (user.role === "master" && role === "user") {
     const masters = await env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'master'`).first<{ n: number }>()
-    if (Number(masters?.n) <= 1) return { error: "Нужен хотя бы один мастер", status: 400 }
+    if (Number(masters?.n) <= 1) return { error: pick("At least one master is required", "Нужен хотя бы один мастер"), status: 400 }
   }
   await env.DB.prepare(`UPDATE users SET role = ? WHERE id = ?`).bind(role, id).run()
   return { user: { ...user, role } }

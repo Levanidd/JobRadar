@@ -1,3 +1,4 @@
+import { useT } from "../i18n"
 import { AutoRunSettings, ModelUsageLog, RunLog } from "./AutoRun"
 import { ModelPicker } from "./ModelPicker"
 import { ProfilePromptEditor } from "./ProfilePrompt"
@@ -9,6 +10,7 @@ function Heading({ children }: { children: string }) {
 
 /** Master-only: everything that is about the system rather than one person's search. */
 export function Settings() {
+  const t = useT()
   return (
     <Users
       header={
@@ -16,11 +18,11 @@ export function Settings() {
           <Heading>AI</Heading>
           <ModelPicker />
           <ProfilePromptEditor />
-          <Heading>Автозапуск</Heading>
+          <Heading>{t("Auto-run")}</Heading>
           <AutoRunSettings />
           <RunLog />
           <ModelUsageLog />
-          <Heading>Пользователи</Heading>
+          <Heading>{t("Users")}</Heading>
         </>
       }
     />

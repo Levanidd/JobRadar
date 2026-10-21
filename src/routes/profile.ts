@@ -2,6 +2,7 @@ import { Hono } from "hono"
 
 import { currentUser, masterGuard } from "../auth"
 import { message } from "../errors"
+import { pick } from "../locale"
 import { prefilterAndScore, reapplyPrefilter } from "../ingest"
 import { isScoringProvider, isThinkingLevel, listModels, validateModel, type ScoringProvider } from "../scoring"
 import {
@@ -107,9 +108,14 @@ profile.put("/api/profile/prompt", async (c) => {
   if (denied) return denied
   const body = await c.req.json<{ prompt?: unknown }>().catch(() => ({}) as { prompt?: unknown })
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : ""
-  if (!prompt) return c.json({ error: "Промпт не может быть пустым" }, 400)
+  if (!prompt) return c.json({ error: pick("The prompt cannot be empty", "Промпт не может быть пустым") }, 400)
   if (prompt.length > PROFILE_PROMPT_MAX) {
-    return c.json({ error: `Промпт длиннее ${PROFILE_PROMPT_MAX} символов` }, 400)
+    return c.json({
+      error: pick(
+        `The prompt is longer than ${PROFILE_PROMPT_MAX} characters`,
+        `Промпт длиннее ${PROFILE_PROMPT_MAX} символов`,
+      ),
+    }, 400)
   }
   await writeSetting(c.env, SETTING_PROFILE_PROMPT, prompt)
   return c.json({ prompt })

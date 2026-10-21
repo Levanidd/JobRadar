@@ -83,6 +83,36 @@ a:hover {
   border-bottom: 0.5px solid var(--border-default);
 }
 
+.lang-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lang-switch-btn {
+  min-width: 36px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lang-switch-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.gate-lang {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .header h1 {
   margin: 0;
   font-size: 22px;

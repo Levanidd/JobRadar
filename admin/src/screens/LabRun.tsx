@@ -13,6 +13,7 @@ import {
 import { api, ApiError, UnauthorizedError } from "../api"
 import { useAction, useApp, useLoader } from "../app-context"
 import { Empty, Flags, parseDate, Skeletons } from "../components/common"
+import { getLang, translate, useT } from "../i18n"
 import { ConfirmDialog } from "../components/ConfirmDialog"
 import { STATUS_LABELS, STATUS_TONE } from "../components/JobCard"
 import {
@@ -79,8 +80,8 @@ function errorShare(summary: LabSummary): number | null {
 const METRICS: Metric[] = [
   {
     key: "mae",
-    label: "MAE к baseline",
-    hint: "Среднее |Δ| между средним скором модели и оценкой из базы, по вакансиям",
+    label: "MAE vs baseline",
+    hint: "Mean |Δ| between the model's mean score and the score in the database, per posting",
     better: "low",
     score: (s) => s.mae,
     render: (s) => decimal(s.mae),
@@ -88,8 +89,8 @@ const METRICS: Metric[] = [
   },
   {
     key: "sd",
-    label: "Стабильность, SD",
-    hint: "Среднее стандартное отклонение скоров между повторами внутри вакансии",
+    label: "Stability, SD",
+    hint: "Mean standard deviation of scores across repeats within a posting",
     better: "low",
     score: (s) => s.stability_sd,
     render: (s) => decimal(s.stability_sd),
@@ -98,7 +99,7 @@ const METRICS: Metric[] = [
   {
     key: "flip",
     label: "Flip rate",
-    hint: "Доля вакансий, где повторы оказались по разные стороны порога 70",
+    hint: "Share of postings where repeats landed on opposite sides of the 70 threshold",
     better: "low",
     score: (s) => s.flip_rate,
     render: (s) => percent(s.flip_rate),
@@ -107,7 +108,7 @@ const METRICS: Metric[] = [
   {
     key: "agree",
     label: "Agreement @70",
-    hint: "Доля вакансий, где решение «пинг / не пинг» по большинству повторов совпало с baseline",
+    hint: "Share of postings where the ping / no-ping decision by the majority of repeats matched the baseline",
     better: "high",
     score: (s) => s.agreement70,
     render: (s) => percent(s.agreement70),
@@ -115,8 +116,8 @@ const METRICS: Metric[] = [
   },
   {
     key: "recall",
-    label: "Recall на размеченных",
-    hint: "Доля вакансий, куда вы подались, прошли интервью или сохранили, где средний скор ≥ 70",
+    label: "Recall on labeled",
+    hint: "Share of postings you applied to, interviewed for, or saved where the mean score is at least 70",
     better: "high",
     score: (s) => s.labeled_recall,
     render: (s) => percent(s.labeled_recall),
@@ -124,8 +125,8 @@ const METRICS: Metric[] = [
   },
   {
     key: "german",
-    label: "Флаг «немецкий»",
-    hint: "Доля вакансий, где german_required совпал с baseline",
+    label: "“German” flag",
+    hint: "Share of postings where german_required matched the baseline",
     better: "high",
     score: (s) => s.german_flag_match,
     render: (s) => percent(s.german_flag_match),
@@ -133,16 +134,21 @@ const METRICS: Metric[] = [
   },
   {
     key: "errors",
-    label: "Ошибки",
-    hint: "Упавшие попытки от всех завершённых",
+    label: "Errors",
+    hint: "Failed attempts out of all finished ones",
     better: "low",
     score: errorShare,
-    render: (s) => `${percent(errorShare(s))} · ${s.n_failed} из ${s.n_ok + s.n_failed}`,
+    render: (s) =>
+      translate(getLang(), "{share} · {failed} of {total}", {
+        share: percent(errorShare(s)),
+        failed: s.n_failed,
+        total: s.n_ok + s.n_failed,
+      }),
   },
   {
     key: "p50",
-    label: "Латентность p50 / p95",
-    hint: "Медиана и 95-й перцентиль длительности успешной попытки",
+    label: "Latency p50 / p95",
+    hint: "Median and 95th percentile of a successful attempt's duration",
     better: "low",
     score: (s) => s.p50_ms,
     render: (s) => `${ms(s.p50_ms)} / ${ms(s.p95_ms)}`,
@@ -150,31 +156,31 @@ const METRICS: Metric[] = [
   },
   {
     key: "tokens",
-    label: "Токены вх / исх / мысли",
-    hint: "Среднее на попытку; исходящие включают рассуждения",
+    label: "Tokens in / out / thoughts",
+    hint: "Average per attempt; output includes reasoning",
     render: (s) => `${compactTokens(s.avg_in)} / ${compactTokens(s.avg_out)} / ${compactTokens(s.avg_thought)}`,
     n: (s) => s.n.tokens,
   },
   {
     key: "cost",
-    label: "Стоимость прогона",
-    hint: "Токены × цена модели за миллион",
+    label: "Run cost",
+    hint: "Tokens times the model price per million",
     better: "low",
     score: (s) => s.cost_usd,
     render: (s) => usd(s.cost_usd),
   },
   {
     key: "per_job",
-    label: "За вакансию",
-    hint: "Средняя стоимость одной попытки",
+    label: "Per posting",
+    hint: "Average cost of one attempt",
     better: "low",
     score: (s) => s.cost_per_job_usd,
     render: (s) => usd(s.cost_per_job_usd),
   },
   {
     key: "monthly",
-    label: "Прогноз в месяц",
-    hint: "Стоимость за вакансию × 9 000 вакансий в месяц",
+    label: "Monthly forecast",
+    hint: "Cost per posting × 9,000 postings a month",
     better: "low",
     score: (s) => s.monthly_usd,
     render: (s) => usd(s.monthly_usd),
@@ -223,6 +229,7 @@ export function LabRunScreen({
   onBack: () => void
   onClone: (source: CloneSource) => void
 }) {
+  const t = useT()
   const run = useAction()
   const { notify, logout } = useApp()
   const [detail, setDetail] = useState<LabRunDetail | null>(null)
@@ -268,8 +275,8 @@ export function LabRunScreen({
     if (!detail) return
     if (wasLive.current && !live) {
       const status = detail.run.status
-      if (status === "done") notify("Прогон завершён")
-      else if (status === "error") notify(detail.run.error || "Прогон оборвался", "error")
+      if (status === "done") notify(t("Run finished"))
+      else if (status === "error") notify(detail.run.error || t("The run stopped"), "error")
     }
     wasLive.current = live
   }, [live, detail, notify])
@@ -324,10 +331,10 @@ export function LabRunScreen({
   if (missing) {
     return (
       <section className="card">
-        <Empty title="Прогон не найден" hint="Возможно, его удалили." />
+        <Empty title={t("Run not found")} hint={t("It may have been deleted.")} />
         <div className="row">
           <button className="btn btn-sm" onClick={onBack}>
-            ← Все прогоны
+            {t("← All runs")}
           </button>
         </div>
       </section>
@@ -343,7 +350,7 @@ export function LabRunScreen({
   const best = bestByMetric(detail.summary)
 
   function retryOne(trialId: number) {
-    void act(() => api.retryLabRun(id, [trialId]), "Попытка снова в очереди")
+    void act(() => api.retryLabRun(id, [trialId]), t("Attempt queued again"))
   }
 
   function clone() {
@@ -368,7 +375,7 @@ export function LabRunScreen({
       <section className="card lab-run-head">
         <div className="lab-form-head">
           <button className="btn btn-ghost btn-sm" onClick={onBack}>
-            ← Все прогоны
+            {t("← All runs")}
           </button>
         </div>
         <div className="lab-run-title">
@@ -376,31 +383,36 @@ export function LabRunScreen({
           <LabStatusBadge status={labRun.status} error={labRun.error} />
         </div>
         <div className="cell-sub lab-run-facts">
-          <span>Профиль: {labRun.user_name ?? `#${labRun.user_id}`}</span>
+          <span>{t("Profile: {name}", { name: labRun.user_name ?? `#${labRun.user_id}` })}</span>
           <span>
             {runSize(detail.jobs.length, detail.candidates.length, labRun.repeats)}
           </span>
           <span>
-            {labRun.sample_mode === "stratified" ? "поровну по диапазонам" : "случайная выборка"}
-            {labRun.include_labeled ? " + размеченные" : ""}
+            {labRun.sample_mode === "stratified" ? t("evenly across ranges") : t("random sample")}
+            {labRun.include_labeled ? t(" + labeled") : ""}
           </span>
           <span>seed {labRun.seed}</span>
-          <span title={`SHA-256 системного промпта: ${labRun.prompt_hash}`}>промпт {labRun.prompt_hash.slice(0, 8)}</span>
-          {labRun.cloned_from ? <span>клон #{labRun.cloned_from}</span> : null}
+          <span title={t("SHA-256 of the system prompt: {hash}", { hash: labRun.prompt_hash })}>
+            {t("prompt {hash}", { hash: labRun.prompt_hash.slice(0, 8) })}
+          </span>
+          {labRun.cloned_from ? <span>{t("clone #{id}", { id: labRun.cloned_from })}</span> : null}
         </div>
 
         <LabProgress done={labRun.done} total={labRun.total} failed={labRun.failed} />
         {started ? (
           <span className="muted">
-            {live ? "Идёт " : "Шёл "}
-            {elapsed(started.getTime(), (finished ?? new Date(now)).getTime())}
-            {live && labRun.status === "queued" ? " · ждёт свободного воркера" : ""}
+            {live
+              ? t("Running {time}", { time: elapsed(started.getTime(), (finished ?? new Date(now)).getTime()) })
+              : t("Ran {time}", { time: elapsed(started.getTime(), (finished ?? new Date(now)).getTime()) })}
+            {live && labRun.status === "queued" ? t(" · waiting for a free worker") : ""}
           </span>
         ) : null}
 
         {detail.cycle_running && live ? (
           <div className="lab-banner lab-banner-warning">
-            Идёт основной прогон — лаборатория делит с ним лимиты провайдеров, ответы могут приходить медленнее.
+            {t(
+              "A main run is in progress — the lab shares provider limits with it, so answers may arrive more slowly.",
+            )}
           </div>
         ) : null}
         {labRun.error ? <div className="lab-banner lab-banner-negative">{labRun.error}</div> : null}
@@ -408,21 +420,21 @@ export function LabRunScreen({
         <div className="row">
           {live ? (
             <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => setConfirmCancel(true)}>
-              Отменить
+              {t("Cancel run")}
             </button>
           ) : null}
           <button
             className="btn btn-sm"
             disabled={busy || failedCount === 0}
-            onClick={() => void act(() => api.retryLabRun(id), "Упавшие попытки снова в очереди")}
+            onClick={() => void act(() => api.retryLabRun(id), t("Failed attempts queued again"))}
           >
-            Повторить упавшие ({failedCount})
+            {t("Retry failed ({count})", { count: failedCount })}
           </button>
           <button className="btn btn-sm" disabled={busy} onClick={clone}>
-            Клонировать
+            {t("Clone")}
           </button>
           <button className="btn btn-sm btn-ghost" onClick={() => void run(() => api.downloadLabCsv(id))}>
-            Экспорт CSV
+            {t("Export CSV")}
           </button>
         </div>
       </section>
@@ -439,30 +451,33 @@ export function LabRunScreen({
           ))}
         </div>
         <p className="stat-hint lab-caption">
-          Baseline — оценка текущего скорера, не истина. Recall на размеченных — сравнение с вашими реальными решениями.
-          Вероятный источник baseline: {labRun.baseline_model ?? "неизвестен"}. Наведите на название метрики, чтобы
-          увидеть формулу; n — на скольких вакансиях или попытках она посчитана.
+          {t(
+            "Baseline is the current scorer's score, not the truth. Recall on labeled postings compares it with your real decisions. Likely baseline source: {model}. Hover a metric name to see the formula; n is how many postings or attempts it was computed on.",
+            { model: labRun.baseline_model ?? t("unknown") },
+          )}
         </p>
       </section>
 
       <section className="lab-matrix-section">
         <div className="card-title-row">
-          <h3 className="card-title">Матрица</h3>
+          <h3 className="card-title">{t("Matrix")}</h3>
           <span className="count">
-            {shown.length === detail.jobs.length ? `${shown.length} вакансий` : `${shown.length} из ${detail.jobs.length}`}
+            {shown.length === detail.jobs.length
+              ? t("{count} postings", { count: shown.length })
+              : t("{shown} of {total}", { shown: shown.length, total: detail.jobs.length })}
           </span>
         </div>
         <MatrixFilters value={filters} onChange={setFilters} />
         {shown.length === 0 ? (
           <section className="card">
-            <Empty title="Под фильтр ничего не попало" />
+            <Empty title={t("Nothing matches the filter")} />
           </section>
         ) : (
           <div className="table-wrap lab-matrix-wrap">
             <table className="table lab-matrix">
               <thead>
                 <tr>
-                  <th className="lab-sticky">Вакансия</th>
+                  <th className="lab-sticky">{t("Posting")}</th>
                   <th>Baseline</th>
                   {detail.candidates.map((candidate) => (
                     <th key={candidate.id} title={candidate.model}>
@@ -522,16 +537,16 @@ export function LabRunScreen({
 
       {confirmCancel ? (
         <ConfirmDialog
-          title="Отменить прогон?"
-          confirmLabel="Отменить прогон"
-          cancelLabel="Не отменять"
+          title={t("Cancel the run?")}
+          confirmLabel={t("Cancel the run")}
+          cancelLabel={t("Don't cancel")}
           busy={busy}
           onConfirm={() =>
-            void act(() => api.cancelLabRun(id), "Прогон отменён").then(() => setConfirmCancel(false))
+            void act(() => api.cancelLabRun(id), t("Run cancelled")).then(() => setConfirmCancel(false))
           }
           onCancel={() => setConfirmCancel(false)}
         >
-          Попытки из очереди не выполнятся. Те, что уже отправлены модели, допишутся.
+          {t("Queued attempts will not run. Ones already sent to a model will still be recorded.")}
         </ConfirmDialog>
       ) : null}
     </>
@@ -547,6 +562,7 @@ function CandidateCard({
   summary: LabSummary | undefined
   best: Map<string, Set<number>>
 }) {
+  const t = useT()
   return (
     <article className="card lab-metric-card">
       <header className="lab-metric-head">
@@ -566,7 +582,7 @@ function CandidateCard({
             const isBest = best.get(metric.key)?.has(candidate.id) ?? false
             return (
               <Fragment key={metric.key}>
-                <dt title={metric.hint}>{metric.label}</dt>
+                <dt title={t(metric.hint)}>{t(metric.label)}</dt>
                 <dd className={isBest ? "is-best" : undefined}>
                   {metric.render(summary)}
                   {metric.n ? <span className="lab-n">n={metric.n(summary)}</span> : null}
@@ -576,21 +592,24 @@ function CandidateCard({
           })}
         </dl>
       ) : (
-        <p className="muted">Ответов ещё нет</p>
+        <p className="muted">{t("No answers yet")}</p>
       )}
     </article>
   )
 }
 
 function MatrixFilters({ value, onChange }: { value: Filters; onChange: Dispatch<SetStateAction<Filters>> }) {
+  const t = useT()
   const toggles: Array<{ key: "diverge" | "errors" | "labeled"; label: string; hint: string }> = [
     {
       key: "diverge",
-      label: "Только расхождения",
-      hint: `|Δ| ≥ ${DIVERGENCE} у любой модели, flip или решение «пинг» не совпало с baseline`,
+      label: t("Only disagreements"),
+      hint: t("|Δ| ≥ {n} for any model, a flip, or a ping decision that disagrees with the baseline", {
+        n: DIVERGENCE,
+      }),
     },
-    { key: "errors", label: "Только с ошибками", hint: "Есть хотя бы одна упавшая попытка" },
-    { key: "labeled", label: "Только размеченные", hint: "Подался, интервью, сохранено или отказ" },
+    { key: "errors", label: t("Only with errors"), hint: t("At least one failed attempt") },
+    { key: "labeled", label: t("Only labeled"), hint: t("Applied, interview, saved, or rejected") },
   ]
   return (
     <div className="lab-filters">
@@ -608,14 +627,14 @@ function MatrixFilters({ value, onChange }: { value: Filters; onChange: Dispatch
       ))}
       <select
         className="select select-inline"
-        aria-label="Диапазон выборки"
+        aria-label={t("Sample range")}
         value={value.stratum}
         onChange={(event) => {
           const stratum = event.target.value as Filters["stratum"]
           onChange((current) => ({ ...current, stratum }))
         }}
       >
-        <option value="all">Все диапазоны</option>
+        <option value="all">{t("All ranges")}</option>
         {(Object.keys(STRATUM_LABEL) as LabStratum[]).map((stratum) => (
           <option key={stratum} value={stratum}>
             {STRATUM_LABEL[stratum]}
@@ -624,23 +643,24 @@ function MatrixFilters({ value, onChange }: { value: Filters; onChange: Dispatch
       </select>
       <select
         className="select select-inline"
-        aria-label="Сортировка"
+        aria-label={t("Sort")}
         value={value.sort}
         onChange={(event) => {
           const sort = event.target.value as Sort
           onChange((current) => ({ ...current, sort }))
         }}
       >
-        <option value="order">По порядку выборки</option>
-        <option value="baseline">По baseline</option>
-        <option value="delta">По максимальному |Δ|</option>
-        <option value="spread">По разбросу</option>
+        <option value="order">{t("By sample order")}</option>
+        <option value="baseline">{t("By baseline")}</option>
+        <option value="delta">{t("By largest |Δ|")}</option>
+        <option value="spread">{t("By spread")}</option>
       </select>
     </div>
   )
 }
 
 function JobCell({ job }: { job: LabJob }) {
+  useT()
   const status = job.baseline_status
   return (
     <td className="lab-sticky lab-job">
@@ -683,6 +703,7 @@ function MatrixCell({
   disabled: boolean
   onRetry: (trialId: number) => void
 }) {
+  const t = useT()
   const warn = cell && (cell.flip || (cell.spread ?? 0) >= DIVERGENCE)
   return (
     <td className={`lab-cell ${toneOf(cell?.mean)}`}>
@@ -701,13 +722,17 @@ function MatrixCell({
           {warn ? (
             <span
               className="lab-warn"
-              title={cell.flip ? "Повторы оказались по разные стороны порога 70" : `Разброс между повторами ${cell.spread}`}
+              title={
+                cell.flip
+                  ? t("Repeats landed on opposite sides of the 70 threshold")
+                  : t("Spread across repeats: {n}", { n: cell.spread ?? 0 })
+              }
             >
-              ⚠ {cell.flip ? "flip" : `разброс ${cell.spread}`}
+              ⚠ {cell.flip ? "flip" : t("spread {n}", { n: cell.spread ?? 0 })}
             </span>
           ) : null}
           {cell.unstable_flags.length ? (
-            <span className="lab-unstable" title="Флаги, которые встретились не во всех повторах">
+            <span className="lab-unstable" title={t("Flags that did not appear in every repeat")}>
               ⚑ {cell.unstable_flags.length}
             </span>
           ) : null}
@@ -726,6 +751,7 @@ function TrialChip({
   disabled?: boolean
   onRetry?: (trialId: number) => void
 }) {
+  const t = useT()
   if (trial.status === "ok") {
     return (
       <span className="lab-score" title={trial.reason ?? undefined}>
@@ -741,8 +767,8 @@ function TrialChip({
           <button
             type="button"
             className="lab-retry"
-            aria-label="Повторить попытку"
-            title="Повторить попытку"
+            aria-label={t("Retry attempt")}
+            title={t("Retry attempt")}
             disabled={disabled}
             onClick={quiet(() => onRetry(trial.id))}
           >
@@ -753,11 +779,11 @@ function TrialChip({
     )
   }
   if (trial.status === "running") {
-    return <span className="lab-spinner" role="status" aria-label="Модель отвечает" />
+    return <span className="lab-spinner" role="status" aria-label={t("The model is responding")} />
   }
-  if (trial.status === "pending") return <span className="lab-pending" aria-label="В очереди" />
+  if (trial.status === "pending") return <span className="lab-pending" aria-label={t("Queued")} />
   return (
-    <span className="lab-cancelled" title="Отменена">
+    <span className="lab-cancelled" title={t("Attempt cancelled")}>
       —
     </span>
   )
@@ -774,6 +800,7 @@ function JobPanel({
   candidates: LabCandidate[]
   trialsFor: (candidateId: number) => LabTrial[]
 }) {
+  const t = useT()
   const run = useAction()
   const [detail, setDetail] = useState<LabJobDetail | null>(null)
   const [raw, setRaw] = useState(false)
@@ -798,19 +825,19 @@ function JobPanel({
     <div className="lab-panel" onClick={(event) => event.stopPropagation()}>
       <div className="lab-panel-grid">
         <div className="lab-panel-block">
-          <h4 className="lab-panel-title">Описание — ровно то, что ушло в модель</h4>
+          <h4 className="lab-panel-title">{t("Description — exactly what was sent to the model")}</h4>
           {detail ? <div className="lab-description">{detail.job.description}</div> : <div className="skeleton lab-skeleton" />}
         </div>
         <div className="lab-panel-block">
           <h4 className="lab-panel-title">Baseline · {job.baseline_score ?? "—"}</h4>
-          <p className="lab-reason">{job.baseline_reason || "Причина не сохранена"}</p>
+          <p className="lab-reason">{job.baseline_reason || t("No reason was stored")}</p>
           <Flags raw={job.baseline_flags} />
         </div>
       </div>
 
       <label className="check-inline">
         <input type="checkbox" className="checkbox" checked={raw} onChange={(event) => setRaw(event.target.checked)} />
-        Показать сырой ответ модели
+        {t("Show the raw model response")}
       </label>
 
       <div className="lab-panel-candidates">
@@ -822,7 +849,7 @@ function JobPanel({
             {trialsFor(candidate.id).map((trial) => (
               <div key={trial.id} className="lab-trial">
                 <div className="lab-trial-head">
-                  <span className="muted">Повтор {trial.repeat_no}</span>
+                  <span className="muted">{t("Repeat {n}", { n: trial.repeat_no })}</span>
                   {trial.status === "ok" ? (
                     <span className={`lab-score ${toneOf(trial.score)}`}>{trial.score}</span>
                   ) : (
@@ -832,8 +859,9 @@ function JobPanel({
                   {trial.input_tokens !== null ? (
                     <span className="lab-trial-stats">
                       {compactTokens(trial.input_tokens)} / {compactTokens(trial.output_tokens)}
-                      {trial.thought_tokens ? ` (мысли ${compactTokens(trial.thought_tokens)})` : ""} · {ms(trial.duration_ms)}
-                      {trial.attempts > 1 ? ` · попыток ${trial.attempts}` : ""}
+                      {trial.thought_tokens ? t(" (thoughts {n})", { n: compactTokens(trial.thought_tokens) }) : ""} ·{" "}
+                      {ms(trial.duration_ms)}
+                      {trial.attempts > 1 ? t(" · attempts {n}", { n: trial.attempts }) : ""}
                     </span>
                   ) : null}
                 </div>

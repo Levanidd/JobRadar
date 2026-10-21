@@ -1,4 +1,5 @@
 import { useApp } from "../app-context"
+import { useT } from "../i18n"
 import { oneOf, usePersistentState } from "../persist"
 import type { Source } from "../types"
 import { Discovery } from "./Discovery"
@@ -9,8 +10,8 @@ export type ResourcePane = "discovery" | "explore" | "sources"
 
 const PANES: Array<{ id: ResourcePane; label: string; master?: boolean }> = [
   { id: "discovery", label: "Discovery" },
-  { id: "explore", label: "Исследовать", master: true },
-  { id: "sources", label: "Источники" },
+  { id: "explore", label: "Explore", master: true },
+  { id: "sources", label: "Sources" },
 ]
 
 export function Resources({
@@ -20,6 +21,7 @@ export function Resources({
   onOpenCompanyJobs: (company: { company_key: string }) => void
   onOpenSourceJobs: (source: Source) => void
 }) {
+  const t = useT()
   const { me } = useApp()
   const master = me?.role === "master"
   const [stored, setPane] = usePersistentState<ResourcePane>(
@@ -32,7 +34,7 @@ export function Resources({
 
   return (
     <>
-      <div className="subtabs" role="tablist" aria-label="Ресурсы">
+      <div className="subtabs" role="tablist" aria-label={t("Resources")}>
         {panes.map((item) => (
           <button
             key={item.id}
@@ -44,7 +46,7 @@ export function Resources({
             aria-controls={`resources-panel-${item.id}`}
             onClick={() => setPane(item.id)}
           >
-            {item.label}
+            {t(item.label)}
           </button>
         ))}
       </div>

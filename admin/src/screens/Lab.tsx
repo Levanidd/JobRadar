@@ -5,6 +5,7 @@ import { useAction, useApp, useLoader } from "../app-context"
 import { Empty, formatDate, Skeletons } from "../components/common"
 import { ConfirmDialog } from "../components/ConfirmDialog"
 import { FlaskIcon, PlusIcon, TrashIcon } from "../components/icons"
+import { useT } from "../i18n"
 import { candidateName, isLive, LAB_STATUS, usd, type CloneSource } from "../lab-format"
 import type { LabRunList, LabRunListItem, LabStatus } from "../types"
 import { Pager } from "./AutoRun"
@@ -50,6 +51,7 @@ export function Lab() {
 }
 
 export function LabStatusBadge({ status, error }: { status: LabStatus; error?: string | null }) {
+  useT()
   const view = LAB_STATUS[status]
   return (
     <span className={`badge badge-${view.tone}`} title={error ?? undefined}>
@@ -60,6 +62,7 @@ export function LabStatusBadge({ status, error }: { status: LabStatus; error?: s
 }
 
 export function LabProgress({ done, total, failed }: { done: number; total: number; failed: number }) {
+  const t = useT()
   const share = total ? Math.min(100, (done / total) * 100) : 0
   return (
     <div className="lab-progress">
@@ -68,7 +71,7 @@ export function LabProgress({ done, total, failed }: { done: number; total: numb
       </div>
       <span className="lab-progress-text">
         {done} / {total}
-        {failed > 0 ? <span className="error-text"> · ошибок {failed}</span> : null}
+        {failed > 0 ? <span className="error-text">{t(" · {count} errors", { count: failed })}</span> : null}
       </span>
     </div>
   )
@@ -107,6 +110,7 @@ function LabRunHistory({
   onOpen: (id: number) => void
   onClone: (source: CloneSource) => void
 }) {
+  const t = useT()
   const run = useAction()
   const { notify } = useApp()
   const [page, setPage] = useState(1)
@@ -134,7 +138,7 @@ function LabRunHistory({
     const result = await run(() => api.deleteLabRun(deleting.id))
     setBusy(false)
     if (!result) return
-    notify(`Прогон «${deleting.name}» удалён`)
+    notify(t("Run “{name}” deleted", { name: deleting.name }))
     setDeleting(null)
     void load()
   }
@@ -149,15 +153,16 @@ function LabRunHistory({
             <FlaskIcon />
           </span>
           <div className="grow">
-            <h2 className="lab-title">Лаборатория моделей</h2>
+            <h2 className="lab-title">{t("Model lab")}</h2>
             <p className="card-sub">
-              Берёт уже оценённые вакансии, прогоняет каждую через несколько моделей по нескольку раз и показывает скоры
-              рядом с текущей оценкой. Ничего в вакансиях и оценках не меняет.
+              {t(
+                "Takes postings that already have a score, runs each one through several models several times, and shows the scores next to the current one. It does not change postings or scores.",
+              )}
             </p>
           </div>
           <button className="btn btn-primary" onClick={onNew}>
             <PlusIcon className="btn-icon" />
-            Новый прогон
+            {t("New run")}
           </button>
         </div>
       </section>
@@ -167,8 +172,8 @@ function LabRunHistory({
       ) : list.runs.length === 0 ? (
         <section className="card">
           <Empty
-            title="Прогонов ещё не было"
-            hint="Начните с 10 вакансий, 2–4 моделей и 3 повторов: этого хватает, чтобы увидеть разброс и цену."
+            title={t("No runs yet")}
+            hint={t("Start with 10 postings, 2–4 models, and 3 repeats: enough to see the spread and the price.")}
           />
         </section>
       ) : (
@@ -176,14 +181,14 @@ function LabRunHistory({
           <table className="table lab-runs">
             <thead>
               <tr>
-                <th>Прогон</th>
-                <th>Профиль</th>
-                <th>Модели</th>
-                <th>Вакансии × повторы</th>
-                <th>Прогресс</th>
-                <th>Статус</th>
-                <th>Стоимость</th>
-                <th aria-label="Действия" />
+                <th>{t("Lab run")}</th>
+                <th>{t("Profile")}</th>
+                <th>{t("Models")}</th>
+                <th>{t("Postings × repeats")}</th>
+                <th>{t("Progress")}</th>
+                <th>{t("Status")}</th>
+                <th>{t("Cost")}</th>
+                <th aria-label={t("Actions")} />
               </tr>
             </thead>
             <tbody>
@@ -193,7 +198,7 @@ function LabRunHistory({
                     <div className="lab-run-name">{item.name}</div>
                     <div className="cell-sub">
                       <span>{formatDate(item.created_at)}</span>
-                      {item.cloned_from ? <span>клон #{item.cloned_from}</span> : null}
+                      {item.cloned_from ? <span>{t("clone #{id}", { id: item.cloned_from })}</span> : null}
                     </div>
                   </td>
                   <td>{item.user_name ?? `#${item.user_id}`}</td>
@@ -218,7 +223,7 @@ function LabRunHistory({
                   <td className="lab-num">
                     {usd(item.cost_usd)}
                     {item.cost_partial ? (
-                      <span className="muted" title="Для части моделей нет цены — они в сумму не входят">
+                      <span className="muted" title={t("Some models have no price — they are not included in the total")}>
                         {" "}
                         *
                       </span>
@@ -227,15 +232,17 @@ function LabRunHistory({
                   <td className="col-actions">
                     <div className="row-tight">
                       <button className="btn btn-sm" onClick={quiet(() => onOpen(item.id))}>
-                        Открыть
+                        {t("Open")}
                       </button>
                       <button className="btn btn-sm btn-ghost" onClick={quiet(() => onClone(cloneSource(item)))}>
-                        Клонировать
+                        {t("Clone")}
                       </button>
                       <button
                         className="icon-btn"
-                        aria-label={`Удалить «${item.name}»`}
-                        title={isLive(item.status) ? "Идущий прогон нельзя удалить — сначала отмените его" : "Удалить"}
+                        aria-label={t("Delete “{name}”", { name: item.name })}
+                        title={
+                          isLive(item.status) ? t("A running run cannot be deleted — cancel it first") : t("Delete")
+                        }
                         disabled={isLive(item.status)}
                         onClick={quiet(() => setDeleting(item))}
                       >
@@ -254,13 +261,16 @@ function LabRunHistory({
 
       {deleting ? (
         <ConfirmDialog
-          title="Удалить прогон?"
-          confirmLabel="Удалить"
+          title={t("Delete the run?")}
+          confirmLabel={t("Delete")}
+          cancelLabel={t("Cancel")}
           busy={busy}
           onConfirm={() => void remove()}
           onCancel={() => setDeleting(null)}
         >
-          «{deleting.name}» удалится вместе со всеми попытками. Расход в журнале запросов к модели останется.
+          {t("“{name}” will be deleted along with every attempt. The spend stays in the model request log.", {
+            name: deleting.name,
+          })}
         </ConfirmDialog>
       ) : null}
     </>

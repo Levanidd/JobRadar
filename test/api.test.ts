@@ -347,7 +347,7 @@ describe("applied", () => {
       }),
     })
     expect(created.status).toBe(201)
-    expect(created.body.job).toMatchObject({ title: "Head of Product", status: "applied", source_label: "Вручную" })
+    expect(created.body.job).toMatchObject({ title: "Head of Product", status: "applied", source_label: "Added by hand" })
 
     const listed = await call("/api/applied")
     expect(listed.body.jobs).toHaveLength(1)
@@ -361,7 +361,7 @@ describe("applied", () => {
       body: JSON.stringify({ title: "PM", company: "Acme", url: "not a url" }),
     })
     expect(res.status).toBe(400)
-    expect(res.body.error).toContain("ссылка")
+    expect(res.body.error).toContain("link")
   })
 })
 
@@ -817,7 +817,7 @@ describe("users", () => {
   it("refuses to demote the last master", async () => {
     expect(
       await call("/api/users/1", { method: "PATCH", body: JSON.stringify({ role: "user" }) }),
-    ).toMatchObject({ status: 400, body: { error: "Нужен хотя бы один мастер" } })
+    ).toMatchObject({ status: 400, body: { error: "At least one master is required" } })
   })
 
   it("promotes a user to master and back", async () => {

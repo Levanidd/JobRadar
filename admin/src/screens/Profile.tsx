@@ -4,7 +4,9 @@ import { api } from "../api"
 import { useAction, useApp, useLoader } from "../app-context"
 import { TagEditor } from "../components/TagEditor"
 import { Skeletons } from "../components/common"
+import { useT } from "../i18n"
 import type { BlacklistedCompany, PrefilterRules } from "../types"
+
 function sameTags(left: PrefilterRules, right: PrefilterRules): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
@@ -29,6 +31,7 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 export function Profile({ subject }: { subject?: { id: number; name: string } } = {}) {
+  const t = useT()
   const run = useAction()
   const { notify, refresh } = useApp()
   const [content, setContent] = useState<string | null>(null)
@@ -65,7 +68,7 @@ export function Profile({ subject }: { subject?: { id: number; name: string } } 
     setBusy(true)
     const result = await run(
       () => (otherId ? api.saveUserProfile(otherId, { content }) : api.saveProfile(content)),
-      "Профиль сохранён",
+      t("Profile saved"),
     )
     setBusy(false)
     if (result) setSaved(content)
@@ -83,7 +86,7 @@ export function Profile({ subject }: { subject?: { id: number; name: string } } 
     setSavedPrefilter(next)
     const dropped = result.applied?.dropped ?? 0
     const restored = result.applied?.restored ?? 0
-    notify(`Теги сохранены. Отсеяно ${dropped}, возвращено в очередь ${restored}`, "ok")
+    notify(t("Tags saved. Filtered out {dropped}, returned to the queue {restored}", { dropped, restored }), "ok")
   }
 
   async function persistBlacklist(next: BlacklistedCompany[]) {
@@ -113,27 +116,29 @@ export function Profile({ subject }: { subject?: { id: number; name: string } } 
 
   async function copyPrompt() {
     if (!prompt) {
-      notify("Промпт ещё не задан", "error")
+      notify(t("No prompt yet"), "error")
       return
     }
-    if (await copyText(prompt)) notify("Промпт скопирован. Вставьте его в Claude или ChatGPT вместе с резюме", "ok")
-    else notify("Буфер обмена недоступен", "error")
+    if (await copyText(prompt)) notify(t("Prompt copied. Paste it into Claude or ChatGPT together with your resume"), "ok")
+    else notify(t("Clipboard unavailable"), "error")
   }
 
   async function rescore() {
-    if (!confirm("Обнулить score активных вакансий и пересчитать заново?")) return
+    if (!confirm(t("Reset scores on active jobs and score them again?"))) return
     setBusy(true)
     const result = await run(() => (otherId ? api.rescoreUser(otherId) : api.rescore()))
     setBusy(false)
-    if (result) notify(`Пересчитано вакансий: ${result.scored}`, "ok")
+    if (result) notify(t("Jobs rescored: {scored}", { scored: result.scored }), "ok")
   }
 
   return (
     <>
       {subject ? (
         <section className="card">
-          <h3 className="card-title">Настройки: {subject.name}</h3>
-          <p className="card-sub">Префильтр, чёрный список и текст для скоринга этого человека. Вакансии и отклики не показываются.</p>
+          <h3 className="card-title">{t("Settings: {name}", { name: subject.name })}</h3>
+          <p className="card-sub">
+            {t("Prefilter, blacklist, and the scoring text for this person. Jobs and applications are not shown.")}
+          </p>
         </section>
       ) : null}
 
@@ -142,15 +147,16 @@ export function Profile({ subject }: { subject?: { id: number; name: string } } 
       ) : (
         <>
           <section className="card">
-            <h3 className="card-title">Префильтр по названию</h3>
+            <h3 className="card-title">{t("Title prefilter")}</h3>
             <p className="card-sub">
-              До модели. Title проходит, если содержит хотя бы один тег из «должно быть», и не содержит
-              ни одного из «не должно». Регистр и лишние пробелы не важны. Только для этого профиля.
+              {t(
+                "Before the model. A title passes if it contains at least one \"must have\" tag and none of the \"must not\" tags. Case and extra spaces do not matter. This profile only.",
+              )}
             </p>
 
             <div className="prefilter-grid">
               <div className="field">
-                <span className="field-label">Должно содержать — хотя бы один</span>
+                <span className="field-label">{t("Must contain — at least one")}</span>
                 <TagEditor
                   tags={prefilter.keep}
                   tone="keep"
@@ -160,7 +166,7 @@ export function Profile({ subject }: { subject?: { id: number; name: string } } 
                 />
               </div>
               <div className="field">
-                <span className="field-label">Не должно содержать — ни одного</span>
+                <span className="field-label">{t("Must not contain — none of these")}</span>
                 <TagEditor
                   tags={prefilter.drop}
                   tone="drop"
@@ -172,7 +178,7 @@ export function Profile({ subject }: { subject?: { id: number; name: string } } 
             </div>
 
             {prefilter.keep.length === 0 ? (
-              <p className="error-text">Без тегов «должно содержать» ни одна вакансия не пройдёт в скоринг.</p>
+              <p className="error-text">{t("Without \"must contain\" tags, no job reaches scoring.")}</p>
             ) : null}
 
             <div className="row">
@@ -181,91 +187,94 @@ export function Profile({ subject }: { subject?: { id: number; name: string } } 
                 disabled={busy || sameTags(prefilter, savedPrefilter)}
                 onClick={() => void savePrefilter()}
               >
-                Сохранить теги
+                {t("Save tags")}
               </button>
             </div>
           </section>
 
           <section className="card">
-            <h3 className="card-title">Чёрный список компаний</h3>
+            <h3 className="card-title">{t("Company blacklist")}</h3>
             <p className="card-sub">
-              Вакансии этих компаний по-прежнему собираются для всех, но скрыты в ваших списках и не
-              скорятся для этого профиля. Если убрать компанию из списка, они снова появятся у вас.
+              {t(
+                "Jobs from these companies are still collected for everyone, but they are hidden in your lists and are not scored for this profile. Remove a company and they show up for you again.",
+              )}
             </p>
 
             <div className="tag-editor">
-            {blacklist.length > 0 ? (
-              <div className="tag-list">
-                {blacklist.map((item) => (
-                  <span key={item.company_key} className="tag tag-drop">
-                    {item.company}
-                    <button
-                      type="button"
-                      className="tag-remove"
-                      disabled={busy}
-                      aria-label={`Убрать ${item.company}`}
-                      onClick={() => removeBlocked(item.company_key)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="muted">Пока пусто</p>
-            )}
-
-            <form
-              className="tag-add"
-              onSubmit={(event) => {
-                event.preventDefault()
-                addBlocked()
-              }}
-            >
-              <select
-                className="select"
-                value={pick}
-                disabled={busy}
-                onChange={(event) => setPick(event.target.value)}
-              >
-                <option value="">Выберите компанию</option>
-                {companies
-                  .filter((item) => !blacklist.some((blocked) => blocked.company_key === item.company_key))
-                  .map((item) => (
-                    <option key={item.company_key} value={item.company_key}>
+              {blacklist.length > 0 ? (
+                <div className="tag-list">
+                  {blacklist.map((item) => (
+                    <span key={item.company_key} className="tag tag-drop">
                       {item.company}
-                    </option>
+                      <button
+                        type="button"
+                        className="tag-remove"
+                        disabled={busy}
+                        aria-label={t("Remove {company}", { company: item.company })}
+                        onClick={() => removeBlocked(item.company_key)}
+                      >
+                        ×
+                      </button>
+                    </span>
                   ))}
-              </select>
-              <button className="btn btn-sm" type="submit" disabled={busy || !pick}>
-                Добавить
-              </button>
-            </form>
+                </div>
+              ) : (
+                <p className="muted">{t("Nothing here yet")}</p>
+              )}
+
+              <form
+                className="tag-add"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  addBlocked()
+                }}
+              >
+                <select
+                  className="select"
+                  value={pick}
+                  disabled={busy}
+                  onChange={(event) => setPick(event.target.value)}
+                >
+                  <option value="">{t("Select a company")}</option>
+                  {companies
+                    .filter((item) => !blacklist.some((blocked) => blocked.company_key === item.company_key))
+                    .map((item) => (
+                      <option key={item.company_key} value={item.company_key}>
+                        {item.company}
+                      </option>
+                    ))}
+                </select>
+                <button className="btn btn-sm" type="submit" disabled={busy || !pick}>
+                  {t("Add")}
+                </button>
+              </form>
             </div>
           </section>
 
           <section className="card">
-            <h3 className="card-title">Профиль для скоринга</h3>
+            <h3 className="card-title">{t("Scoring profile")}</h3>
             <p className="card-sub">
-              Этот текст уходит в системный промпт модели. Единственная ручка калибровки — правьте его, а не код.
+              {t("This text goes into the model's system prompt. It is the only calibration knob — edit this, not the code.")}
             </p>
             <textarea className="textarea" value={content} onChange={(event) => setContent(event.target.value)} />
             <div className="row">
               <button className="btn btn-primary btn-sm" disabled={busy || content === saved} onClick={() => void save()}>
-                Сохранить
+                {t("Save")}
               </button>
               <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void refresh()}>
-                Обновить
+                {t("Refresh")}
               </button>
               <button className="btn btn-sm" disabled={busy} onClick={() => void rescore()}>
-                Пересчитать
+                {t("Recalculate")}
               </button>
               <button
                 className="btn btn-sm"
-                title="Копирует в буфер промпт: вставьте его в Claude или ChatGPT, и ассистент по вашему резюме соберёт профиль"
+                title={t(
+                  "Copies a prompt to the clipboard. Paste it into Claude or ChatGPT and the assistant will build a profile from your resume.",
+                )}
                 onClick={() => void copyPrompt()}
               >
-                Скачать промпт для профиля
+                {t("Download the profile prompt")}
               </button>
             </div>
           </section>

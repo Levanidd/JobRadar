@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNo
 
 import { api } from "../api"
 import { useAction } from "../app-context"
+import { getLang, useT } from "../i18n"
 import { Age, Field, ScoreBadge, formatDate, formatSalary } from "./common"
 import { DocumentIcon, PencilIcon, PlusIcon, TrashIcon } from "./icons"
 import type { InterviewStage, Job, JobDuplicate, JobStatus } from "../types"
@@ -23,6 +24,7 @@ function listScore(job: Job): number | null {
 }
 
 function SideList({ jobs, activeId, onSelect }: { jobs: Job[]; activeId: string; onSelect: (job: Job) => void }) {
+  const t = useT()
   const active = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -30,7 +32,7 @@ function SideList({ jobs, activeId, onSelect }: { jobs: Job[]; activeId: string;
   }, [activeId])
 
   return (
-    <nav className="job-side" aria-label="Вакансии из списка">
+    <nav className="job-side" aria-label={t("Jobs in this list")}>
       {jobs.map((item) => (
         <button
           key={item.id}
@@ -52,13 +54,14 @@ function SideList({ jobs, activeId, onSelect }: { jobs: Job[]; activeId: string;
 }
 
 function ClaudeComment({ text }: { text: string | null | undefined }) {
+  const t = useT()
   return (
     <div className="claude-comment">
-      <span className="field-label">Комментарий Claude</span>
+      <span className="field-label">{t("Claude's comment")}</span>
       {text ? (
         <div className="claude-comment-body">{text}</div>
       ) : (
-        <p className="muted claude-comment-empty">Пока нет</p>
+        <p className="muted claude-comment-empty">{t("Nothing yet")}</p>
       )}
     </div>
   )
@@ -79,15 +82,15 @@ const NOTES_AUTOSAVE_MS = 1000
 
 type SaveState = "idle" | "pending" | "saving" | "saved" | "error"
 
-const SAVE_LABEL: Record<SaveState, string> = {
-  idle: "",
-  pending: "Есть несохранённые изменения",
-  saving: "Сохраняю…",
-  saved: "Сохранено",
-  error: "Не сохранилось — попробую при следующей правке",
+const SAVE_LABEL: Record<Exclude<SaveState, "idle">, string> = {
+  pending: "Unsaved changes",
+  saving: "Saving…",
+  saved: "Saved",
+  error: "Didn't save — I'll try again on the next edit",
 }
 
 function Notes({ job, onSaved }: { job: Job; onSaved: (notes: string) => void }) {
+  const t = useT()
   const run = useAction()
   const [text, setText] = useState(job.notes ?? "")
   const [state, setState] = useState<SaveState>("idle")
@@ -157,23 +160,24 @@ function Notes({ job, onSaved }: { job: Job; onSaved: (notes: string) => void })
 
   return (
     <div className="job-notes-own">
-      <Field label="Заметки">
+      <Field label={t("Notes")}>
         <textarea
           className="textarea textarea-notes"
-          placeholder="С кем говорил, что отправил, следующие шаги…"
+          placeholder={t("Who you talked to, what you sent, next steps…")}
           value={text}
           onChange={(event) => change(event.target.value)}
           onBlur={flush}
         />
       </Field>
       <span className={`notes-state ${state === "error" ? "error-text" : "muted"}`} aria-live="polite">
-        {SAVE_LABEL[state]}
+        {state === "idle" ? "" : t(SAVE_LABEL[state])}
       </span>
     </div>
   )
 }
 
 function Duplicates({ job, onJob }: { job: Job; onJob?: (job: Job) => void }) {
+  const t = useT()
   const run = useAction()
   const [busy, setBusy] = useState<string | null>(null)
   const listings = job.duplicates ?? []
@@ -189,8 +193,10 @@ function Duplicates({ job, onJob }: { job: Job; onJob?: (job: Job) => void }) {
 
   return (
     <div className="job-dupes">
-      <p className="job-dupes-title">Другие объявления</p>
-      <p className="job-dupes-hint">Одна и та же вакансия на разных досках. Галочка — какую показывать в списке.</p>
+      <p className="job-dupes-title">{t("Other listings")}</p>
+      <p className="job-dupes-hint">
+        {t("The same job on different boards. The check mark is the one shown in the list.")}
+      </p>
       {listings.map((item) => (
         <label key={item.id} className="job-dupe">
           <input
@@ -198,7 +204,7 @@ function Duplicates({ job, onJob }: { job: Job; onJob?: (job: Job) => void }) {
             className="checkbox"
             checked={item.primary}
             disabled={Boolean(busy)}
-            aria-label={`Показывать в списке: ${item.source_label}`}
+            aria-label={t("Show in the list: {source}", { source: item.source_label })}
             onChange={() => void pick(item)}
           />
           <span className="job-dupe-body">
@@ -215,16 +221,26 @@ function Duplicates({ job, onJob }: { job: Job; onJob?: (job: Job) => void }) {
   )
 }
 
-export const STATUS_LABELS: Record<JobStatus, string> = {
-  new: "Новая",
-  notified: "Отправлена",
-  saved: "Сохранена",
-  applied: "Подался",
-  interview: "Интервью",
-  rejected: "Отказ",
-  ignored: "Скрыта",
-  off_profile: "Вне профиля",
+const STATUS_TEXT: Record<JobStatus, { en: string; ru: string }> = {
+  new: { en: "New", ru: "Новая" },
+  notified: { en: "Sent", ru: "Отправлена" },
+  saved: { en: "Saved", ru: "Сохранена" },
+  applied: { en: "Applied", ru: "Подался" },
+  interview: { en: "Interview", ru: "Интервью" },
+  rejected: { en: "Rejected", ru: "Отказ" },
+  ignored: { en: "Hidden", ru: "Скрыта" },
+  off_profile: { en: "Off profile", ru: "Вне профиля" },
 }
+
+/** Labels follow the UI language. Callers re-render because the app shell subscribes to it. */
+export function statusLabel(status: JobStatus): string {
+  return STATUS_TEXT[status][getLang()]
+}
+
+/** @deprecated Read through statusLabel so the language switch updates the text. */
+export const STATUS_LABELS: Record<JobStatus, string> = new Proxy({} as Record<JobStatus, string>, {
+  get: (_target, prop: string) => STATUS_TEXT[prop as JobStatus]?.[getLang()] ?? prop,
+})
 
 export const STATUS_TONE: Partial<Record<JobStatus, string>> = {
   applied: "badge-accent",
@@ -246,6 +262,7 @@ function Actions({
   onStatus: (status: JobStatus) => void
   onPatch: (next: Partial<Job>) => void
 }) {
+  const t = useT()
   const run = useAction()
   const [busy, setBusy] = useState(false)
 
@@ -265,7 +282,7 @@ function Actions({
     return (
       <div className="row card-actions">
         <button className="btn btn-sm" onClick={() => onStatus("applied")}>
-          Подался
+          {statusLabel("applied")}
         </button>
         <button
           className={`btn btn-sm ${job.viewed_at ? "btn-primary" : ""}`}
@@ -273,7 +290,7 @@ function Actions({
           disabled={busy}
           onClick={() => void toggle("viewed")}
         >
-          Посмотрел
+          {t("Viewed")}
         </button>
         <button
           className={`btn btn-sm ${job.later_at ? "btn-primary" : ""}`}
@@ -281,7 +298,7 @@ function Actions({
           disabled={busy}
           onClick={() => void toggle("later")}
         >
-          Позже
+          {t("Later")}
         </button>
       </div>
     )
@@ -298,24 +315,29 @@ function Actions({
         aria-pressed={interview}
         onClick={() => onStatus(interview ? "applied" : "interview")}
       >
-        Интервью
+        {statusLabel("interview")}
       </button>
       <button
         className={`btn btn-sm ${rejected ? "btn-primary" : ""}`}
         aria-pressed={rejected}
         onClick={() => onStatus(rejected ? beforeRejection : "rejected")}
       >
-        Отказ
+        {statusLabel("rejected")}
       </button>
     </div>
   )
 }
 
-function formatDay(day: string | null): string {
-  if (!day) return "без даты"
+function formatDay(day: string | null, missing: string): string {
+  if (!day) return missing
   const date = new Date(`${day}T00:00:00`)
   if (Number.isNaN(date.getTime())) return day
-  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" })
+  const lang = getLang()
+  return date.toLocaleDateString(lang === "ru" ? "ru-RU" : "en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
 }
 
 type StageDraft = { title: string; happened_on: string | null }
@@ -331,6 +353,7 @@ function StageForm({
   onSave: (draft: StageDraft) => void
   onCancel: () => void
 }) {
+  const t = useT()
   const [title, setTitle] = useState(initial?.title ?? "")
   const [day, setDay] = useState(initial?.happened_on ?? "")
 
@@ -348,29 +371,30 @@ function StageForm({
       <input
         className="input"
         autoFocus
-        placeholder="Например: HR-скрининг"
-        aria-label="Этап"
+        placeholder={t("For example: HR screening")}
+        aria-label={t("Stage")}
         value={title}
         onChange={(event) => setTitle(event.target.value)}
       />
       <input
         className="input stage-date-input"
         type="date"
-        aria-label="Дата этапа"
+        aria-label={t("Stage date")}
         value={day}
         onChange={(event) => setDay(event.target.value)}
       />
       <button type="submit" className="btn btn-sm btn-primary" disabled={busy || !title.trim()}>
-        Сохранить
+        {t("Save")}
       </button>
       <button type="button" className="btn btn-sm btn-ghost" onClick={onCancel}>
-        Отмена
+        {t("Cancel")}
       </button>
     </form>
   )
 }
 
 function Stages({ job, onPatch }: { job: Job; onPatch: (next: Partial<Job>) => void }) {
+  const t = useT()
   const run = useAction()
   const stages = job.stages ?? []
   const [editing, setEditing] = useState<number | "new" | null>(null)
@@ -402,12 +426,15 @@ function Stages({ job, onPatch }: { job: Job; onPatch: (next: Partial<Job>) => v
   return (
     <section className="stages">
       <div className="stages-head">
-        <span className="field-label">Этапы интервью{stages.length ? ` · ${stages.length}` : ""}</span>
+        <span className="field-label">
+          {t("Interview stages")}
+          {stages.length ? ` · ${stages.length}` : ""}
+        </span>
         <button
           type="button"
           className="icon-btn"
-          title="Добавить этап"
-          aria-label="Добавить этап"
+          title={t("Add a stage")}
+          aria-label={t("Add a stage")}
           disabled={editing !== null || busy}
           onClick={() => setEditing("new")}
         >
@@ -415,7 +442,7 @@ function Stages({ job, onPatch }: { job: Job; onPatch: (next: Partial<Job>) => v
         </button>
       </div>
       {stages.length === 0 && editing !== "new" ? (
-        <p className="muted stages-empty">Пока ни одного этапа — добавьте через +</p>
+        <p className="muted stages-empty">{t("No stages yet — add one with +")}</p>
       ) : null}
       {stages.length || editing === "new" ? (
         <ol className="stage-list">
@@ -428,13 +455,13 @@ function Stages({ job, onPatch }: { job: Job; onPatch: (next: Partial<Job>) => v
               <li key={stage.id} className="stage-item">
                 <span className="stage-num">{index + 1}</span>
                 <span className="stage-title">{stage.title}</span>
-                <span className="stage-date">{formatDay(stage.happened_on)}</span>
+                <span className="stage-date">{formatDay(stage.happened_on, t("No date"))}</span>
                 <span className="stage-tools">
                   <button
                     type="button"
                     className="icon-btn"
-                    title="Изменить"
-                    aria-label={`Изменить: ${stage.title}`}
+                    title={t("Edit")}
+                    aria-label={t("Edit: {title}", { title: stage.title })}
                     disabled={editing !== null || busy}
                     onClick={() => setEditing(stage.id)}
                   >
@@ -443,8 +470,8 @@ function Stages({ job, onPatch }: { job: Job; onPatch: (next: Partial<Job>) => v
                   <button
                     type="button"
                     className="icon-btn"
-                    title="Удалить"
-                    aria-label={`Удалить: ${stage.title}`}
+                    title={t("Delete")}
+                    aria-label={t("Delete: {title}", { title: stage.title })}
                     disabled={editing !== null || busy}
                     onClick={() => void remove(stage)}
                   >
@@ -497,13 +524,14 @@ export function JobCard({
   onSelect?: (job: Job) => void
   children?: ReactNode
 }) {
+  const t = useT()
   const pay = formatSalary(job.salary_min, job.salary_max, job.salary_currency)
   const side = list && onSelect && list.length > 0 ? list : null
   return (
     <>
       <div className="row">
         <button className="btn btn-ghost btn-sm" onClick={onBack}>
-          ← К списку
+          {t("← Back to the list")}
         </button>
       </div>
       <div className={side ? "job-view" : undefined}>
@@ -521,8 +549,8 @@ export function JobCard({
                     href={job.cv_url}
                     target="_blank"
                     rel="noreferrer"
-                    title="Открыть CV"
-                    aria-label="Открыть CV"
+                    title={t("Open CV")}
+                    aria-label={t("Open CV")}
                   >
                     <DocumentIcon />
                   </a>
@@ -533,7 +561,7 @@ export function JobCard({
                 <button
                   type="button"
                   className="cell-link"
-                  title={`Все вакансии ${job.company}`}
+                  title={t("All jobs at {company}", { company: job.company })}
                   onClick={() => onOpenCompany(job)}
                 >
                   {job.company}
@@ -552,11 +580,11 @@ export function JobCard({
           {job.status === "interview" || job.interviewed_at ? <Stages job={job} onPatch={onPatch} /> : null}
 
           <div className="applied-meta">
-            <Meta label="Опубликована" value={job.posted_at} />
-            <Meta label="Добавлена" value={job.first_seen_at} />
-            <Meta label="Обновлена" value={job.changed_at ?? job.first_seen_at} />
-            <Meta label="Подался" value={job.applied_at} />
-            {job.interviewed_at ? <Meta label="Собес" value={job.interviewed_at} /> : null}
+            <Meta label={t("Posted")} value={job.posted_at} />
+            <Meta label={t("Added")} value={job.first_seen_at} />
+            <Meta label={t("Updated")} value={job.changed_at ?? job.first_seen_at} />
+            <Meta label={statusLabel("applied")} value={job.applied_at} />
+            {job.interviewed_at ? <Meta label={t("Interview")} value={job.interviewed_at} /> : null}
           </div>
 
           {children}
@@ -564,7 +592,9 @@ export function JobCard({
           {job.description ? (
             <div className="job-description">{job.description}</div>
           ) : (
-            <p className="muted">Описание не сохранилось — его не было в источнике или его отсекли до скоринга.</p>
+            <p className="muted">
+              {t("The description wasn't saved — it wasn't in the source, or it was cut before scoring.")}
+            </p>
           )}
 
           <div className="job-notes">

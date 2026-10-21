@@ -140,7 +140,7 @@ describe("Nebius scoring", () => {
     expect(await listModels("nebius", "k")).toEqual([
       {
         id: "meta-llama/Llama-3.3-70B-Instruct",
-        label: "Llama 3.3 70B · $0.13 / $0.40 за 1M",
+        label: "Llama 3.3 70B · $0.13 / $0.40 per 1M",
         price_in_per_m: 0.13,
         price_out_per_m: 0.4,
       },

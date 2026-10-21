@@ -3,6 +3,7 @@ import { bodyComesLater, fetchLateBody } from "./adapters/details"
 import { companyKey, companiesRelated, dedupKey, jobHash, titleKey } from "./company-key"
 import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
+import { pick } from "./locale"
 import { clipDescription, passesPrefilter } from "./prefilter"
 import { toSalary } from "./salary"
 import { scoreInBatches, scoreJobs, type ScoreInput } from "./scoring"
@@ -452,7 +453,7 @@ function inheritFirstSeen(env: Bindings, firstSeenAt: string, id: string): D1Pre
 
 /**
  * Makes `jobId` the listing the lists show. The previous primary keeps its
- * row and becomes a duplicate; verdicts follow so «подался» stays on what
+ * row and becomes a duplicate; verdicts follow so an application stays on what
  * the person sees.
  */
 export async function setPrimaryListing(env: Bindings, jobId: string): Promise<boolean> {
@@ -1021,7 +1022,7 @@ export async function scoreJobsByIds(env: Bindings, ids: string[], userId: numbe
 
     out.push({ id: job.id, score: item.score, score_reason: item.reason || null, flags, status })
   }
-  if (out.length === 0) throw new Error("Модель не вернула оценку")
+  if (out.length === 0) throw new Error(pick("The model returned no score", "Модель не вернула оценку"))
   return out
 }
 
@@ -1090,7 +1091,7 @@ async function ensureManualSource(env: Bindings): Promise<number> {
   if (existing) return existing.id
   await env.DB.prepare(
     `INSERT INTO sources (kind, tier, label, provider, token, enabled)
-     VALUES ('company', 'watchlist', 'Вручную', 'manual', 'manual', 0)`,
+     VALUES ('company', 'watchlist', 'Added by hand', 'manual', 'manual', 0)`,
   ).run()
   const created = await env.DB.prepare(
     `SELECT id FROM sources WHERE provider = 'manual' AND token = 'manual'`,
@@ -1103,8 +1104,8 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
   const title = input.title.trim()
   const company = input.company.trim()
   const url = parseJobUrl(input.url)
-  if (!title || !company) throw new Error("Нужны должность и компания")
-  if (!url) throw new Error("Нужна ссылка http(s) на позицию")
+  if (!title || !company) throw new Error(pick("A title and a company are required", "Нужны должность и компания"))
+  if (!url) throw new Error(pick("An http(s) link to the posting is required", "Нужна ссылка http(s) на позицию"))
 
   const status = input.status === "interview" ? "interview" : "applied"
   const sourceId = await ensureManualSource(env)

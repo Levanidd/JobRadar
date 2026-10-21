@@ -90,7 +90,7 @@ describe("salary", () => {
     })
     expect(toSalary({ min: 40, period: "hour", currency: "EUR" })?.min).toBe(83_200)
     expect(formatSalary(80_000, 110_000, "EUR")).toBe("€80k–110k")
-    expect(formatSalary(150_000, null, "USD")).toBe("от $150k")
+    expect(formatSalary(150_000, null, "USD")).toBe("from $150k")
   })
 })
 

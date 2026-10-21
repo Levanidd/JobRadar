@@ -406,7 +406,7 @@ describe("lab preview and validation", () => {
       by_stratum: { "0-39": 6, "40-69": 4, "70-100": 5, labeled: 4 },
     })
     expect(res.body.est_cost_usd).toBeGreaterThan(0)
-    expect(res.body.warnings).toContain("Нет цены для gemini-lab — в стоимость не входит")
+    expect(res.body.warnings).toContain("No price for gemini-lab — left out of the cost")
     expect(await rows(env, `SELECT id FROM lab_runs`)).toHaveLength(0)
   })
 
@@ -414,27 +414,27 @@ describe("lab preview and validation", () => {
     await seedPool()
     stubProvider()
     env.NEBIUS_API_KEY = undefined
-    expect((await call("/api/lab/preview", post({ candidates: FOUR }))).body.error).toBe("NEBIUS_API_KEY не настроен")
+    expect((await call("/api/lab/preview", post({ candidates: FOUR }))).body.error).toBe("NEBIUS_API_KEY is not configured")
 
     const lena = (await call("/api/users", post({ name: "Лена" }))).body.user.id
     const empty = await call("/api/lab/preview", post({ user_id: lena, candidates: [GEMINI] }))
-    expect(empty.body).toMatchObject({ pool_size: 0, trials: 0, error: "Нет оценённых вакансий для этого профиля" })
+    expect(empty.body).toMatchObject({ pool_size: 0, trials: 0, error: "No scored postings for this profile" })
   })
 
   it("rejects a malformed run with a message in Russian", async () => {
     await seedPool()
     stubProvider()
     const create = async (body: Record<string, unknown>) => (await call("/api/lab/runs", post(body))).body.error
-    expect(await create({ candidates: [] })).toBe("Добавьте хотя бы одну модель")
-    expect(await create({ candidates: [GEMINI, GEMINI] })).toBe("Модель gemini-lab указана дважды")
+    expect(await create({ candidates: [] })).toBe("Add at least one model")
+    expect(await create({ candidates: [GEMINI, GEMINI] })).toBe("Model gemini-lab is listed twice")
     const seven = Array.from({ length: 7 }, (_, index) => ({ provider: "nebius", model: `m${index}` }))
-    expect(await create({ candidates: seven })).toBe("Не больше 6 моделей в прогоне")
+    expect(await create({ candidates: seven })).toBe("At most 6 models in a run")
     const six = seven.slice(0, 6)
     expect(await create({ sample_size: 30, repeats: 5, candidates: six })).toBe(
-      "Слишком много попыток: 900 > 300. Уменьшите выборку, модели или повторы",
+      "Too many trials: 900 > 300. Shrink the sample, the models, or the repeats",
     )
-    expect(await create({ sample_size: 0, candidates: [GEMINI] })).toBe("Размер выборки — от 1 до 30")
-    expect(await create({ name: "x".repeat(81), candidates: [GEMINI] })).toBe("Название — до 80 символов")
+    expect(await create({ sample_size: 0, candidates: [GEMINI] })).toBe("Sample size — from 1 to 30")
+    expect(await create({ name: "x".repeat(81), candidates: [GEMINI] })).toBe("Name — up to 80 characters")
     expect(await rows(env, `SELECT id FROM lab_runs`)).toHaveLength(0)
   })
 
@@ -442,12 +442,12 @@ describe("lab preview and validation", () => {
     await seedPool()
     stubProvider()
     env.NEBIUS_API_KEY = "CHANGE_ME"
-    expect((await call("/api/lab/runs", post({ candidates: [GEMINI, QWEN] }))).body.error).toBe("NEBIUS_API_KEY не настроен")
+    expect((await call("/api/lab/runs", post({ candidates: [GEMINI, QWEN] }))).body.error).toBe("NEBIUS_API_KEY is not configured")
 
     env.NEBIUS_API_KEY = "nebius-secret"
     const res = await call("/api/lab/runs", post({ candidates: [GEMINI, { provider: "nebius", model: "missing/model" }] }))
     expect(res.status).toBe(400)
-    expect(res.body.error).toMatch(/^Модель missing\/model недоступна: Nebius call failed: 404/)
+    expect(res.body.error).toMatch(/^Model missing\/model is unavailable: Nebius call failed: 404/)
     expect(res.body.candidate_errors).toMatchObject([{ index: 1 }])
     expect(await rows(env, `SELECT kind FROM model_batches ORDER BY id`)).toEqual([{ kind: "check" }, { kind: "check" }])
     expect(await rows(env, `SELECT id FROM lab_runs`)).toHaveLength(0)
@@ -457,7 +457,7 @@ describe("lab preview and validation", () => {
     stubProvider()
     expect(await call("/api/lab/runs", post({ candidates: [GEMINI] }))).toMatchObject({
       status: 400,
-      body: { error: "Нет оценённых вакансий для этого профиля" },
+      body: { error: "No scored postings for this profile" },
     })
   })
 
@@ -467,7 +467,7 @@ describe("lab preview and validation", () => {
     const first = await createLabRun(env, MASTER, { sample_size: 2, repeats: 1, candidates: [GEMINI] })
     expect(first.status).toBe(201)
     const id = runId(first)
-    const busy = `Дождитесь завершения прогона #${id}`
+    const busy = `Wait for run #${id} to finish`
     expect(await call("/api/lab/runs", post({ candidates: [GEMINI] }))).toMatchObject({ status: 409, body: { error: busy } })
     expect((await call("/api/lab/preview", post({ candidates: [GEMINI] }))).body.error).toBe(busy)
     expect(await call(`/api/lab/runs/${id}`, { method: "DELETE" })).toMatchObject({ status: 409 })
@@ -549,7 +549,7 @@ describe("lab runs", () => {
     await settle()
     const second = await call("/api/lab/runs", body)
     await settle()
-    expect(first.body.run.name).toMatch(/^Прогон #\d+ · \d\d\.\d\d\.\d{4}$/)
+    expect(first.body.run.name).toMatch(/^Run #\d+ · \d\d\.\d\d\.\d{4}$/)
     const ids = async (id: number) => (await detail(id)).jobs.map((job: any) => job.job_id)
     expect(await ids(second.body.run.id)).toEqual(await ids(first.body.run.id))
   })
@@ -565,7 +565,7 @@ describe("lab runs", () => {
     const before = await productionTables()
     const created = await call("/api/lab/runs", post({ sample_size: 5, repeats: 1, candidates: [GEMINI] }))
     expect(created.status).toBe(201)
-    expect(created.body.warnings).toContain("В пуле только 4 — прогон взял все")
+    expect(created.body.warnings).toContain("Only 4 in the pool — the run took all of them")
     await settle()
     const body = await detail(created.body.run.id)
     expect(body.jobs.map((job: any) => job.job_id).sort()).toEqual(["job-0", "job-1", "job-2"])
@@ -608,7 +608,7 @@ describe("lab runs", () => {
     expect((await detail(id)).run).toMatchObject({ status: "done", failed: 0 })
     expect(await call(`/api/lab/runs/${id}/retry`, post({}))).toMatchObject({
       status: 400,
-      body: { error: "Нет упавших попыток" },
+      body: { error: "No failed trials" },
     })
   })
 

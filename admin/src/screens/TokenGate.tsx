@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react"
 
 import { api, forgetToken, setToken, UnauthorizedError } from "../api"
+import { LanguageSwitch, useT } from "../i18n"
 
 export function TokenGate({ onAuthorized }: { onAuthorized: () => void }) {
+  const t = useT()
   const [value, setValue] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
@@ -18,7 +20,7 @@ export function TokenGate({ onAuthorized }: { onAuthorized: () => void }) {
       onAuthorized()
     } catch (err) {
       forgetToken()
-      setError(err instanceof UnauthorizedError ? "Неверный токен" : "Не удалось связаться с API")
+      setError(err instanceof UnauthorizedError ? t("Invalid token") : t("Couldn't reach the API"))
     } finally {
       setChecking(false)
     }
@@ -27,9 +29,12 @@ export function TokenGate({ onAuthorized }: { onAuthorized: () => void }) {
   return (
     <div className="gate">
       <form className="gate-card" onSubmit={submit}>
+        <div className="gate-lang">
+          <LanguageSwitch />
+        </div>
         <h1>JobRadar</h1>
         <p className="gate-hint">
-          Вставьте свой токен. Его выдаёт мастер. Он хранится только в этой вкладке и стирается, когда вы её закрываете.
+          {t("Paste your token. The master issues it. It stays in this tab and is erased when you close the tab.")}
         </p>
         <input
           className="input"
@@ -37,12 +42,12 @@ export function TokenGate({ onAuthorized }: { onAuthorized: () => void }) {
           value={value}
           autoFocus
           autoComplete="off"
-          placeholder="токен"
+          placeholder={t("token")}
           onChange={(event) => setValue(event.target.value)}
         />
         {error ? <div className="error-text">{error}</div> : null}
         <button className="btn btn-primary" type="submit" disabled={!value.trim() || checking}>
-          {checking ? "Проверяю…" : "Войти"}
+          {checking ? t("Checking…") : t("Log in")}
         </button>
       </form>
     </div>

@@ -38,7 +38,7 @@ export function renderDigest(jobs: DigestJob[], newCompanies: number): string {
     }
   }
   if (newCompanies > 0) {
-    blocks.push(`\nновые компании: ${newCompanies}`)
+    blocks.push(`\nnew companies: ${newCompanies}`)
   }
   return blocks.join("\n")
 }

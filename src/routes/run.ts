@@ -4,6 +4,7 @@ import { currentUser, masterGuard } from "../auth"
 import { enqueueTick, loadCycleView, requestOrigin, startCycle, tickOnce } from "../cycle"
 import { notifyNew, pickSources, prefilterAndScore, type SourcePolicy } from "../ingest"
 import { SCHEDULE_TIMEZONE, loadSchedule, sanitizeTimes, saveSchedule } from "../schedule"
+import { pick } from "../locale"
 import type { AppEnv } from "../types"
 
 export const run = new Hono<AppEnv>()
@@ -61,8 +62,10 @@ run.put("/api/run/schedule", async (c) => {
     return c.json({ error: "enabled and times required" }, 400)
   }
   const times = sanitizeTimes(body.times)
-  if (times.length !== new Set(body.times).size) return c.json({ error: "Время должно быть в формате ЧЧ:ММ" }, 400)
-  if (body.enabled && times.length === 0) return c.json({ error: "Добавьте хотя бы одно время запуска" }, 400)
+  if (times.length !== new Set(body.times).size) return c.json({ error: pick("Time must look like HH:MM", "Время должно быть в формате ЧЧ:ММ") }, 400)
+  if (body.enabled && times.length === 0) {
+    return c.json({ error: pick("Add at least one start time", "Добавьте хотя бы одно время запуска") }, 400)
+  }
   const saved = await saveSchedule(c.env, { enabled: body.enabled, times })
   return c.json({ ...saved, timezone: SCHEDULE_TIMEZONE })
 })

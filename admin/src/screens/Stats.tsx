@@ -2,19 +2,31 @@ import { useCallback, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useLoader } from "../app-context"
-import { oneOf, usePersistentState } from "../persist"
 import { Empty, Skeletons, plural } from "../components/common"
+import { getLang, useT } from "../i18n"
+import { oneOf, usePersistentState } from "../persist"
 import type { JobStats, StatsBucket } from "../types"
 import type { PipeFilter } from "./Applied"
 
 type PeriodId = "30" | "90" | "365" | "all"
 
 const PERIODS: Array<{ id: PeriodId; label: string }> = [
-  { id: "30", label: "30 дней" },
-  { id: "90", label: "3 месяца" },
-  { id: "365", label: "Год" },
-  { id: "all", label: "Всё время" },
+  { id: "30", label: "30 days" },
+  { id: "90", label: "3 months" },
+  { id: "365", label: "Year" },
+  { id: "all", label: "All time" },
 ]
+
+/** English has one plural. Russian keeps the three forms the counter already asks for. */
+function countForms(
+  t: (english: string) => string,
+  one: string,
+  few: string,
+  many: string,
+): [string, string, string] {
+  if (getLang() !== "ru") return [one, many, many]
+  return [t(one), t(few), t(many)]
+}
 
 function pct(part: number, whole: number): string {
   if (!whole) return "—"
@@ -23,15 +35,19 @@ function pct(part: number, whole: number): string {
   return `${rounded}%`
 }
 
+function dateLocale(): string {
+  return getLang() === "ru" ? "ru-RU" : "en-GB"
+}
+
 function weekLabel(start: string): string {
   const date = new Date(`${start}T00:00:00Z`)
-  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short", timeZone: "UTC" })
+  return date.toLocaleDateString(dateLocale(), { day: "numeric", month: "short", timeZone: "UTC" })
 }
 
 function monthLabel(start: string): string {
   const [year, month] = start.split("-").map(Number)
   const date = new Date(Date.UTC(year, month - 1, 1))
-  return date.toLocaleDateString("ru-RU", { month: "short", year: "2-digit", timeZone: "UTC" })
+  return date.toLocaleDateString(dateLocale(), { month: "short", year: "2-digit", timeZone: "UTC" })
 }
 
 function Kpi({
@@ -48,6 +64,7 @@ function Kpi({
   /** Set where the number stands for a list the user can go and look at. */
   onOpen?: () => void
 }) {
+  const t = useT()
   const className = `card stat-card ${tone ? `stat-card-${tone}` : ""}`
   if (!onOpen) {
     return (
@@ -59,7 +76,7 @@ function Kpi({
     )
   }
   return (
-    <button type="button" className={`${className} stat-card-link`} title={`Открыть: ${label}`} onClick={onOpen}>
+    <button type="button" className={`${className} stat-card-link`} title={t("Open: {label}", { label })} onClick={onOpen}>
       <span className="stat-label">{label}</span>
       <strong className="stat-value">{value}</strong>
       <span className="stat-hint">{hint}</span>
@@ -68,14 +85,15 @@ function Kpi({
 }
 
 function Funnel({ stats }: { stats: JobStats }) {
+  const t = useT()
   const max = Math.max(stats.found, 1)
   const steps = [
-    { key: "found", label: "Найдено", value: stats.found, tone: "neutral" },
-    { key: "viewed", label: "Просмотрено", value: stats.viewed, tone: "accent" },
-    { key: "applied", label: "Подался", value: stats.applied, tone: "positive" },
+    { key: "found", label: t("Found"), value: stats.found, tone: "neutral" },
+    { key: "viewed", label: t("Viewed"), value: stats.viewed, tone: "accent" },
+    { key: "applied", label: t("Applied"), value: stats.applied, tone: "positive" },
   ] as const
   return (
-    <div className="funnel" role="img" aria-label="Воронка: найдено, просмотрено, подался">
+    <div className="funnel" role="img" aria-label={t("Funnel: found, viewed, applied")}>
       {steps.map((step) => (
         <div key={step.key} className="funnel-row">
           <span className="funnel-label">{step.label}</span>
@@ -103,6 +121,7 @@ function Chart({
   rows: StatsBucket[]
   label: (start: string) => string
 }) {
+  const t = useT()
   const max = Math.max(1, ...rows.map((row) => row.total))
   const total = rows.reduce((sum, row) => sum + row.total, 0)
   return (
@@ -112,10 +131,13 @@ function Chart({
           <h2 className="card-title">{title}</h2>
           <p className="card-sub">{hint}</p>
         </div>
-        <span className="badge badge-neutral">{total} за период</span>
+        <span className="badge badge-neutral">{t("{total} in the period", { total })}</span>
       </div>
       {total === 0 ? (
-        <Empty title="Пока нет откликов" hint="Отметьте «Подался» на вакансии — столбики появятся здесь." />
+        <Empty
+          title={t("No applications yet")}
+          hint={t("Mark \"Applied\" on a job — the bars will show up here.")}
+        />
       ) : (
         <div className="chart">
           <div className="chart-bars">
@@ -124,11 +146,11 @@ function Chart({
               const titleText = [
                 label(row.start),
                 row.total
-                  ? `${row.total} ${plural(row.total, ["отклик", "отклика", "откликов"])}`
-                  : "нет откликов",
-                row.applied ? `в работе ${row.applied}` : null,
-                row.interview ? `интервью ${row.interview}` : null,
-                row.rejected ? `отказ ${row.rejected}` : null,
+                  ? `${row.total} ${plural(row.total, countForms(t, "application", "a few applications", "applications"))}`
+                  : t("no applications"),
+                row.applied ? t("in progress {count}", { count: row.applied }) : null,
+                row.interview ? t("interview {count}", { count: row.interview }) : null,
+                row.rejected ? t("rejected {count}", { count: row.rejected }) : null,
               ]
                 .filter(Boolean)
                 .join(" · ")
@@ -156,13 +178,16 @@ function Chart({
           </div>
           <div className="chart-legend">
             <span>
-              <i className="chart-dot chart-seg-applied" />в работе
+              <i className="chart-dot chart-seg-applied" />
+              {t("in progress")}
             </span>
             <span>
-              <i className="chart-dot chart-seg-interview" />интервью
+              <i className="chart-dot chart-seg-interview" />
+              {t("interview")}
             </span>
             <span>
-              <i className="chart-dot chart-seg-rejected" />отказ
+              <i className="chart-dot chart-seg-rejected" />
+              {t("rejected")}
             </span>
           </div>
         </div>
@@ -176,6 +201,7 @@ export function Stats({
 }: {
   onOpenApplied: (status: PipeFilter, interviewed?: "yes" | "no") => void
 }) {
+  const t = useT()
   const run = useAction()
   const [stats, setStats] = useState<JobStats | null>(null)
   const [period, setPeriod] = usePersistentState<PeriodId>(
@@ -206,10 +232,12 @@ export function Stats({
           className={`btn btn-sm ${period === item.id ? "btn-primary" : "btn-ghost"}`}
           onClick={() => setPeriod(item.id)}
         >
-          {item.label}
+          {t(item.label)}
         </button>
       ))}
-      <span className="muted stats-period-hint">Диаграммы ниже всегда за свои 12 недель и 12 месяцев</span>
+      <span className="muted stats-period-hint">
+        {t("The charts below always cover their own 12 weeks and 12 months")}
+      </span>
     </div>
   )
 
@@ -229,23 +257,21 @@ export function Stats({
       {periodPicker}
       <div className="stats-kpis">
         <Kpi
-          label="Найдено"
+          label={t("Found")}
           value={stats.found}
-          hint={stats.open === stats.found ? "все ещё открыты" : `открытых сейчас ${stats.open}`}
+          hint={stats.open === stats.found ? t("all still open") : t("{count} open now", { count: stats.open })}
         />
+        <Kpi label={t("Viewed")} value={stats.viewed} hint={t("{pct} of jobs found", { pct: pct(stats.viewed, stats.found) })} tone="accent" />
         <Kpi
-          label="Просмотрено"
-          value={stats.viewed}
-          hint={`${pct(stats.viewed, stats.found)} от найденных`}
-          tone="accent"
-        />
-        <Kpi
-          label="Подался"
+          label={t("Applied")}
           value={stats.applied}
           hint={
             stats.viewed > 0 && stats.applied <= stats.viewed
-              ? `${pct(stats.applied, stats.viewed)} от просмотренных · ${pct(stats.applied, stats.found)} от найденных`
-              : `${pct(stats.applied, stats.found)} от найденных`
+              ? t("{viewed} of viewed · {found} of found", {
+                  viewed: pct(stats.applied, stats.viewed),
+                  found: pct(stats.applied, stats.found),
+                })
+              : t("{pct} of jobs found", { pct: pct(stats.applied, stats.found) })
           }
           tone="positive"
           onOpen={() => onOpenApplied("")}
@@ -255,10 +281,10 @@ export function Stats({
       <article className="card">
         <div className="card-head">
           <div>
-            <h2 className="card-title">Воронка</h2>
+            <h2 className="card-title">{t("Funnel")}</h2>
             <p className="card-sub">
-              {stats.later > 0 ? `Отложено «посмотреть позже»: ${stats.later}. ` : ""}
-              Чёрный список в цифры не входит.
+              {stats.later > 0 ? t("Saved for later: {count}. ", { count: stats.later }) : ""}
+              {t("The blacklist is not included in these numbers.")}
             </p>
           </div>
         </div>
@@ -268,35 +294,43 @@ export function Stats({
       <article className="card">
         <div className="card-head">
           <div>
-            <h2 className="card-title">Подался подробнее</h2>
+            <h2 className="card-title">{t("Applied in detail")}</h2>
             <p className="card-sub">
               {stats.applied
-                ? `Исход есть у ${pct(answered, stats.applied)} откликов${weekTotal ? ` · за 12 недель ${weekTotal}` : ""}`
-                : "Отметьте «Подался» — разбивка и диаграммы появятся здесь."}
+                ? `${t("{pct} of applications have an outcome", { pct: pct(answered, stats.applied) })}${
+                    weekTotal ? t(" · {count} in 12 weeks", { count: weekTotal }) : ""
+                  }`
+                : t("Mark \"Applied\" — the breakdown and charts will show up here.")}
             </p>
           </div>
         </div>
         <div className="stats-kpis stats-kpis-pipeline">
           <Kpi
-            label="В работе"
+            label={t("In progress")}
             value={stats.pipeline.waiting}
-            hint="ещё без интервью и отказа"
+            hint={t("no interview or rejection yet")}
             onOpen={() => onOpenApplied("applied")}
           />
           <Kpi
-            label="Интервью"
+            label={t("Interviews")}
             value={stats.pipeline.interview}
-            hint={stats.applied ? `${pct(stats.pipeline.interview, stats.applied)} от откликов` : "появятся после откликов"}
+            hint={
+              stats.applied
+                ? t("{pct} of applications", { pct: pct(stats.pipeline.interview, stats.applied) })
+                : t("shows up after you apply")
+            }
             tone="positive"
             onOpen={() => onOpenApplied("interview")}
           />
           <Kpi
-            label="Отказ"
+            label={t("Rejected")}
             value={stats.pipeline.rejected}
             hint={
               stats.applied
-                ? `${pct(stats.pipeline.rejected, stats.applied)} от откликов · без собеса`
-                : "появятся после откликов"
+                ? t("{pct} of applications · without an interview", {
+                    pct: pct(stats.pipeline.rejected, stats.applied),
+                  })
+                : t("shows up after you apply")
             }
             onOpen={() => onOpenApplied("rejected", "no")}
           />
@@ -304,21 +338,21 @@ export function Stats({
       </article>
 
       <Chart
-        title="Подача по неделям"
-        hint="Неделя с понедельника. Последние 12 недель."
+        title={t("Applications by week")}
+        hint={t("Weeks start on Monday. The last 12 weeks.")}
         rows={stats.weeks}
         label={weekLabel}
       />
       <Chart
-        title="Подача по месяцам"
-        hint="Календарный месяц. Последние 12 месяцев."
+        title={t("Applications by month")}
+        hint={t("Calendar months. The last 12 months.")}
         rows={stats.months}
         label={monthLabel}
       />
 
       {stats.companies.length > 0 ? (
         <article className="card">
-          <h2 className="card-title">Куда подавался чаще</h2>
+          <h2 className="card-title">{t("Companies you applied to most")}</h2>
           <ul className="stat-companies">
             {stats.companies.map((item) => (
               <li key={item.company_key}>

@@ -1,6 +1,7 @@
 import { bodyComesLater, fetchLateBody } from "./adapters/details"
 import { chunk, placeholders, runBatch } from "./db"
-import { D1_LIMIT_MESSAGE, isD1LimitError, message } from "./errors"
+import { d1LimitMessage, isD1LimitError, message } from "./errors"
+import { pick } from "./locale"
 import { labMetrics, parseFlags, toCsv, type CsvRow, type LabCell, type LabSummary } from "./lab-metrics"
 import {
   BANDS,
@@ -68,7 +69,7 @@ const RETRYABLE: ScoringErrorCode[] = ["http_429", "http_5xx", "timeout"]
  */
 const POOL_STATUSES = ["new", "notified", "saved", "applied", "interview", "rejected", "ignored"]
 
-const EMPTY_POOL = "Нет оценённых вакансий для этого профиля"
+const emptyPool = () => pick("No scored postings for this profile", "Нет оценённых вакансий для этого профиля")
 
 export type LabStatus = "queued" | "running" | "done" | "error" | "cancelled"
 
@@ -207,7 +208,10 @@ function bad(error: string): LabResult<never> {
 const NOT_FOUND: LabResult<never> = { status: 404, body: { error: "not found" } }
 
 function tooManyTrials(trials: number): string {
-  return `Слишком много попыток: ${trials} > ${LAB_MAX_TRIALS}. Уменьшите выборку, модели или повторы`
+  return pick(
+    `Too many trials: ${trials} > ${LAB_MAX_TRIALS}. Shrink the sample, the models, or the repeats`,
+    `Слишком много попыток: ${trials} > ${LAB_MAX_TRIALS}. Уменьшите выборку, модели или повторы`,
+  )
 }
 
 // ---------- parameters ----------
@@ -229,16 +233,18 @@ function candidateKey(candidate: CandidateInput): string {
 }
 
 export function parseCandidates(raw: unknown, defaultThinking: ThinkingLevel): CandidateInput[] | LabError {
-  if (!Array.isArray(raw) || raw.length === 0) return { error: "Добавьте хотя бы одну модель" }
-  if (raw.length > MAX_CANDIDATES) return { error: `Не больше ${MAX_CANDIDATES} моделей в прогоне` }
+  if (!Array.isArray(raw) || raw.length === 0) return { error: pick("Add at least one model", "Добавьте хотя бы одну модель") }
+  if (raw.length > MAX_CANDIDATES) {
+    return { error: pick(`At most ${MAX_CANDIDATES} models in a run`, `Не больше ${MAX_CANDIDATES} моделей в прогоне`) }
+  }
   const seen = new Set<string>()
   const out: CandidateInput[] = []
   for (const item of raw) {
     const entry = (item && typeof item === "object" ? item : {}) as Record<string, unknown>
     const provider = String(entry.provider ?? "")
-    if (!isScoringProvider(provider)) return { error: "Неизвестный провайдер модели" }
+    if (!isScoringProvider(provider)) return { error: pick("Unknown model provider", "Неизвестный провайдер модели") }
     const model = String(entry.model ?? "").trim()
-    if (!model) return { error: "Укажите модель в каждой строке" }
+    if (!model) return { error: pick("Enter a model on every row", "Укажите модель в каждой строке") }
     const thinking = String(entry.thinking_level ?? "")
     const candidate: CandidateInput = {
       provider,
@@ -248,7 +254,7 @@ export function parseCandidates(raw: unknown, defaultThinking: ThinkingLevel): C
       price_out_per_m: priceIn(entry.price_out_per_m),
     }
     const key = candidateKey(candidate)
-    if (seen.has(key)) return { error: `Модель ${model} указана дважды` }
+    if (seen.has(key)) return { error: pick(`Model ${model} is listed twice`, `Модель ${model} указана дважды`) }
     seen.add(key)
     out.push(candidate)
   }
@@ -260,17 +266,19 @@ export function parseLabParams(
   defaults: { userId: number; thinking: ThinkingLevel },
 ): LabParams | LabError {
   const name = typeof body.name === "string" ? body.name.trim() : ""
-  if (name.length > NAME_MAX) return { error: `Название — до ${NAME_MAX} символов` }
+  if (name.length > NAME_MAX) return { error: pick(`Name — up to ${NAME_MAX} characters`, `Название — до ${NAME_MAX} символов`) }
   const userId = intIn(body.user_id, defaults.userId, 1, Number.MAX_SAFE_INTEGER)
-  if (userId === null) return { error: "Неизвестный профиль" }
+  if (userId === null) return { error: pick("Unknown profile", "Неизвестный профиль") }
   const size = intIn(body.sample_size, 10, 1, MAX_SAMPLE)
-  if (size === null) return { error: `Размер выборки — от 1 до ${MAX_SAMPLE}` }
+  if (size === null) return { error: pick(`Sample size — from 1 to ${MAX_SAMPLE}`, `Размер выборки — от 1 до ${MAX_SAMPLE}`) }
   const mode = body.sample_mode ?? "stratified"
-  if (mode !== "stratified" && mode !== "random") return { error: "Режим выборки: stratified или random" }
+  if (mode !== "stratified" && mode !== "random") {
+    return { error: pick("Sample mode: stratified or random", "Режим выборки: stratified или random") }
+  }
   const repeats = intIn(body.repeats, 3, 1, MAX_REPEATS)
-  if (repeats === null) return { error: `Повторов — от 1 до ${MAX_REPEATS}` }
+  if (repeats === null) return { error: pick(`Repeats — from 1 to ${MAX_REPEATS}`, `Повторов — от 1 до ${MAX_REPEATS}`) }
   const seed = intIn(body.seed, randomSeed(), 0, 2_147_483_647)
-  if (seed === null) return { error: "Seed — целое число от 0 до 2147483647" }
+  if (seed === null) return { error: pick("Seed — an integer from 0 to 2147483647", "Seed — целое число от 0 до 2147483647") }
   const candidates = parseCandidates(body.candidates, defaults.thinking)
   if ("error" in candidates) return candidates
   const trials = size * candidates.length * repeats
@@ -367,7 +375,7 @@ async function drawSample(env: Bindings, params: LabParams): Promise<{ jobs: Job
   let pool = await readPool(env, params.user_id)
   const warnings: string[] = []
   if (pool.length > 0 && pool.length < params.sample_size) {
-    warnings.push(`В пуле только ${pool.length} — прогон взял все`)
+    warnings.push(pick(`Only ${pool.length} in the pool — the run took all of them`, `В пуле только ${pool.length} — прогон взял все`))
   }
   const late = new Map<string, string>()
   for (let round = 0; ; round++) {
@@ -389,7 +397,14 @@ async function drawSample(env: Bindings, params: LabParams): Promise<{ jobs: Job
       pool = pool.filter((entry) => !gone.has(entry.job_id))
       continue
     }
-    if (lost.length > 0) warnings.push(`У ${lost.length} вакансий не загрузилось описание — выборка меньше`)
+    if (lost.length > 0) {
+      warnings.push(
+        pick(
+          `${lost.length} postings had no description — the sample is smaller`,
+          `У ${lost.length} вакансий не загрузилось описание — выборка меньше`,
+        ),
+      )
+    }
     const jobs = picks.flatMap((pick): JobSnapshot[] => {
       const row = rows.get(pick.job_id)
       const description = text(pick.job_id)
@@ -492,12 +507,12 @@ async function activeRun(env: Bindings): Promise<number | null> {
 }
 
 function busy(id: number): LabResult<never> {
-  return { status: 409, body: { error: `Дождитесь завершения прогона #${id}` } }
+  return { status: 409, body: { error: pick(`Wait for run #${id} to finish`, `Дождитесь завершения прогона #${id}`) } }
 }
 
 function missingKey(env: Bindings, candidates: CandidateInput[]): string | null {
   for (const provider of new Set(candidates.map((candidate) => candidate.provider))) {
-    if (!providerKey(env, provider)) return `${providerKeyName(provider)} не настроен`
+    if (!providerKey(env, provider)) return pick(`${providerKeyName(provider)} is not configured`, `${providerKeyName(provider)} не настроен`)
   }
   return null
 }
@@ -518,7 +533,7 @@ async function pingModels(env: Bindings, me: AuthUser, candidates: CandidateInpu
         )
         return null
       } catch (error) {
-        return { index, error: `Модель ${candidate.model} недоступна: ${message(error)}` }
+        return { index, error: pick(`Model ${candidate.model} is unavailable: ${message(error)}`, `Модель ${candidate.model} недоступна: ${message(error)}`) }
       }
     }),
   )
@@ -584,7 +599,7 @@ export async function previewLab(env: Bindings, me: AuthUser, body: Record<strin
     const parsed = parseCandidates(body.candidates, settings.thinking_level)
     if ("error" in parsed) return bad(parsed.error)
     const chosen = intIn(body.repeats, source.repeats, 1, MAX_REPEATS)
-    if (chosen === null) return bad(`Повторов — от 1 до ${MAX_REPEATS}`)
+    if (chosen === null) return bad(pick(`Repeats — from 1 to ${MAX_REPEATS}`, `Повторов — от 1 до ${MAX_REPEATS}`))
     const jobs = await env.DB.prepare(`SELECT stratum, baseline_status FROM lab_jobs WHERE lab_run_id = ?`)
       .bind(cloneFrom)
       .all<{ stratum: Stratum | null; baseline_status: string | null }>()
@@ -611,25 +626,46 @@ export async function previewLab(env: Bindings, me: AuthUser, body: Record<strin
     repeats = parsed.repeats
     candidates = parsed.candidates
     promptChars = scoringSystemPrompt(await profileText(env, parsed.user_id)).length
-    if (pool.length === 0) error = EMPTY_POOL
-    else if (pool.length < parsed.sample_size) warnings.push(`В пуле только ${pool.length} — прогон возьмёт все`)
+    if (pool.length === 0) error = emptyPool()
+    else if (pool.length < parsed.sample_size) {
+      warnings.push(pick(`Only ${pool.length} in the pool — the run will take all of them`, `В пуле только ${pool.length} — прогон возьмёт все`))
+    }
     if (parsed.sample_mode === "stratified" && pool.length > 0) {
-      for (const band of BANDS) if (byStratum[band] === 0) warnings.push(`В пуле нет вакансий с оценкой ${band.replace("-", "–")}`)
+      for (const band of BANDS) {
+        if (byStratum[band] === 0) {
+          const label = band.replace("-", "–")
+          warnings.push(pick(`The pool has no postings scored ${label}`, `В пуле нет вакансий с оценкой ${label}`))
+        }
+      }
     }
     if (parsed.include_labeled && pool.length > 0 && byStratum.labeled === 0) {
-      warnings.push("Размеченных вакансий (подался, интервью, сохранено, отказ) в пуле нет")
+      warnings.push(
+        pick(
+          "The pool has no labeled postings (applied, interview, saved, rejected)",
+          "Размеченных вакансий (подался, интервью, сохранено, отказ) в пуле нет",
+        ),
+      )
     }
   }
 
   error = error ?? missingKey(env, candidates)
   const active = await activeRun(env)
-  if (active) error = error ?? `Дождитесь завершения прогона #${active}`
+  if (active) error = error ?? pick(`Wait for run #${active} to finish`, `Дождитесь завершения прогона #${active}`)
   const cycle = await env.DB.prepare(`SELECT status FROM cycles WHERE id = 1`).first<{ status: string }>()
-  if (cycle?.status === "running") warnings.push("Идёт основной прогон — лаборатория делит с ним лимиты провайдеров")
+  if (cycle?.status === "running") {
+    warnings.push(
+      pick(
+        "A production run is in progress — the lab shares its provider limits",
+        "Идёт основной прогон — лаборатория делит с ним лимиты провайдеров",
+      ),
+    )
+  }
 
   const priced = await withPrices(env, candidates)
   for (const candidate of priced) {
-    if (candidate.price_in_per_m === null) warnings.push(`Нет цены для ${candidate.model} — в стоимость не входит`)
+    if (candidate.price_in_per_m === null) {
+      warnings.push(pick(`No price for ${candidate.model} — left out of the cost`, `Нет цены для ${candidate.model} — в стоимость не входит`))
+    }
   }
   const trials = sampleSize * candidates.length * repeats
   return {
@@ -715,9 +751,9 @@ async function insertRun(
   try {
     if (!spec.name) {
       await env.DB.prepare(
-        `UPDATE lab_runs SET name = 'Прогон #' || id || ' · ' || strftime('%d.%m.%Y', created_at) WHERE id = ?`,
+        `UPDATE lab_runs SET name = ? || id || ' · ' || strftime('%d.%m.%Y', created_at) WHERE id = ?`,
       )
-        .bind(runId)
+        .bind(`${pick("Run", "Прогон")} #`, runId)
         .run()
     }
 
@@ -803,12 +839,12 @@ export async function createLabRun(
   const params = parseLabParams(body, { userId: me.id, thinking: settings.thinking_level })
   if ("error" in params) return bad(params.error)
   const user = await env.DB.prepare(`SELECT id FROM users WHERE id = ?`).bind(params.user_id).first()
-  if (!user) return bad("Неизвестный профиль")
+  if (!user) return bad(pick("Unknown profile", "Неизвестный профиль"))
   const blocked = await gate(env, me, params.candidates)
   if (blocked) return blocked
 
   const { jobs, warnings } = await drawSample(env, params)
-  if (jobs.length === 0) return bad(EMPTY_POOL)
+  if (jobs.length === 0) return bad(emptyPool())
   const profile = await profileText(env, params.user_id)
   const systemPrompt = scoringSystemPrompt(profile)
   const runId = await insertRun(
@@ -848,14 +884,14 @@ export async function cloneLabRun(
   const candidates = parseCandidates(body.candidates, settings.thinking_level)
   if ("error" in candidates) return bad(candidates.error)
   const repeats = intIn(body.repeats, source.repeats, 1, MAX_REPEATS)
-  if (repeats === null) return bad(`Повторов — от 1 до ${MAX_REPEATS}`)
+  if (repeats === null) return bad(pick(`Repeats — from 1 to ${MAX_REPEATS}`, `Повторов — от 1 до ${MAX_REPEATS}`))
   const name = typeof body.name === "string" ? body.name.trim() : ""
-  if (name.length > NAME_MAX) return bad(`Название — до ${NAME_MAX} символов`)
+  if (name.length > NAME_MAX) return bad(pick(`Name — up to ${NAME_MAX} characters`, `Название — до ${NAME_MAX} символов`))
   const count = await env.DB.prepare(`SELECT COUNT(*) AS n FROM lab_jobs WHERE lab_run_id = ?`)
     .bind(sourceId)
     .first<{ n: number }>()
   const jobCount = Number(count?.n ?? 0)
-  if (jobCount === 0) return bad("В исходном прогоне нет вакансий")
+  if (jobCount === 0) return bad(pick("The source run has no postings", "В исходном прогоне нет вакансий"))
   const trials = jobCount * candidates.length * repeats
   if (trials > LAB_MAX_TRIALS) return bad(tooManyTrials(trials))
   const blocked = await gate(env, me, candidates)
@@ -1157,7 +1193,10 @@ async function runTrial(
   const base = { id: trial.id, candidate_id: trial.candidate_id, score: null, reason: null, flags: null, calls }
   const apiKey = candidate ? providerKey(env, candidate.provider) : undefined
   if (!candidate || !job || !apiKey) {
-    const error = !candidate || !job ? "Снапшот попытки не найден" : `${providerKeyName(candidate.provider)} не настроен`
+    const error =
+      !candidate || !job
+        ? pick("Trial snapshot was not found", "Снапшот попытки не найден")
+        : pick(`${providerKeyName(candidate.provider)} is not configured`, `${providerKeyName(candidate.provider)} не настроен`)
     return { ...base, status: "failed", raw: null, code: "error", error, ...tokens([]), duration: 0 }
   }
   // Provider errors sometimes echo the key back; it must not reach the tables, the model log or the API.
@@ -1305,12 +1344,12 @@ async function advance(env: Bindings, run: LabRunRow, pauses: Map<number, number
     `UPDATE lab_trials SET
        status = CASE WHEN attempts >= ?2 THEN 'failed' ELSE 'pending' END,
        error_code = CASE WHEN attempts >= ?2 THEN 'timeout' ELSE error_code END,
-       error = CASE WHEN attempts >= ?2 THEN 'попытка брошена воркером' ELSE error END,
+       error = CASE WHEN attempts >= ?2 THEN ?3 ELSE error END,
        finished_at = CASE WHEN attempts >= ?2 THEN datetime('now') ELSE NULL END,
        claimed_at = NULL
      WHERE lab_run_id = ?1 AND status = 'running' AND claimed_at < datetime('now', '-90 seconds')`,
   )
-    .bind(run.id, MAX_ATTEMPTS)
+    .bind(run.id, MAX_ATTEMPTS, pick("The worker dropped this trial", "попытка брошена воркером"))
     .run()
 
   const now = Date.now()
@@ -1381,7 +1420,7 @@ export async function tickLab(env: Bindings, runId: number, pauses = new Map<num
     // Out of reads for today: keep the run alive, it carries on after midnight UTC.
     if (isD1LimitError(detail)) {
       await env.DB.prepare(`UPDATE lab_runs SET error = ? WHERE id = ?`)
-        .bind(D1_LIMIT_MESSAGE, runId)
+        .bind(d1LimitMessage(), runId)
         .run()
         .catch(() => undefined)
       return STOP
@@ -1458,7 +1497,7 @@ export async function cancelLabRun(env: Bindings, id: number): Promise<LabResult
     .run()
   if (!Number(stopped.meta.changes)) {
     const exists = await env.DB.prepare(`SELECT id FROM lab_runs WHERE id = ?`).bind(id).first()
-    return exists ? { status: 409, body: { error: "Прогон уже завершён" } } : NOT_FOUND
+    return exists ? { status: 409, body: { error: pick("The run has already finished", "Прогон уже завершён") } } : NOT_FOUND
   }
   await runBatch(env, [
     env.DB.prepare(`UPDATE lab_trials SET status = 'cancelled' WHERE lab_run_id = ? AND status = 'pending'`).bind(id),
@@ -1480,7 +1519,7 @@ export async function retryLabRun(
     if (active && active !== id) return busy(active)
   }
   const ids = Array.isArray(trialIds) ? trialIds.map(Number).filter((value) => Number.isInteger(value)) : []
-  if (Array.isArray(trialIds) && ids.length === 0) return bad("Нет упавших попыток")
+  if (Array.isArray(trialIds) && ids.length === 0) return bad(pick("No failed trials", "Нет упавших попыток"))
   const reset = await env.DB.prepare(
     `UPDATE lab_trials SET status = 'pending', attempts = 0, score = NULL, reason = NULL, flags = NULL,
        raw_response = NULL, error_code = NULL, error = NULL, input_tokens = NULL, output_tokens = NULL,
@@ -1489,7 +1528,7 @@ export async function retryLabRun(
   )
     .bind(id, ...ids)
     .run()
-  if (!Number(reset.meta.changes)) return bad("Нет упавших попыток")
+  if (!Number(reset.meta.changes)) return bad(pick("No failed trials", "Нет упавших попыток"))
   // The recount stamps updated_at, so it goes first: a reopened run has to look stale for the kick that follows.
   await runBatch(env, [
     recount(env, id),
@@ -1520,7 +1559,10 @@ export async function deleteLabRun(env: Bindings, id: number): Promise<LabResult
   const run = await env.DB.prepare(`SELECT status FROM lab_runs WHERE id = ?`).bind(id).first<{ status: LabStatus }>()
   if (!run) return NOT_FOUND
   if (run.status === "queued" || run.status === "running") {
-    return { status: 409, body: { error: "Идущий прогон нельзя удалить — сначала отмените его" } }
+    return {
+      status: 409,
+      body: { error: pick("A running run cannot be deleted — cancel it first", "Идущий прогон нельзя удалить — сначала отмените его") },
+    }
   }
   await dropRun(env, id)
   return { status: 200, body: { ok: true } }

@@ -2,6 +2,7 @@ import { Fragment, useCallback, useRef, useState } from "react"
 
 import { api, type JobFilters, type JobSort } from "../api"
 import { useAction, useApp, useLoader } from "../app-context"
+import { getLang, useT } from "../i18n"
 import { usePersistentState } from "../persist"
 import { ConfirmDialog } from "../components/ConfirmDialog"
 import { RefreshIcon } from "../components/icons"
@@ -14,7 +15,7 @@ import type { CompanyFacet, Job, JobStatus } from "../types"
 /**
  * Every status still gets a label on the card, but only these three are worth
  * browsing by. The application pipeline has a tab of its own, `notified` and
- * `off_profile` are bookkeeping the machine does, and «Все»
+ * `off_profile` are bookkeeping the machine does, and "All"
  * already brings the prefiltered pile back.
  */
 const FILTER_STATUSES: JobStatus[] = ["new", "saved", "ignored"]
@@ -48,6 +49,28 @@ function markOf(filters: JobFilters): MarkFilter {
   if (filters.viewed === "yes") return "viewed"
   if (filters.applied === "no" && filters.later === "no" && filters.viewed === "no") return "new"
   return ""
+}
+
+/** English has one plural. Russian keeps the three forms the counter already asks for. */
+function countForms(
+  t: (english: string) => string,
+  one: string,
+  few: string,
+  many: string,
+): [string, string, string] {
+  if (getLang() !== "ru") return [one, many, many]
+  return [t(one), t(few), t(many)]
+}
+
+function withTitle(template: string, title: string) {
+  const [before, after = ""] = template.split("{title}")
+  return (
+    <>
+      {before}
+      <b>{title}</b>
+      {after}
+    </>
+  )
 }
 
 const DEFAULT_FILTERS: JobFilters = {
@@ -110,6 +133,7 @@ export function Jobs({
   preset?: JobFilters
   onOpenCompany: (company: { company_key: string }) => void
 }) {
+  const t = useT()
   const run = useAction()
   const { notify } = useApp()
   const [filters, setFilters] = usePersistentState<JobFilters>(
@@ -129,11 +153,11 @@ export function Jobs({
     | null
   >(null)
   const [confirming, setConfirming] = useState(false)
-  // "с даты…" has to stay picked while the date field is still empty, which the
+  // "From a date…" has to stay picked while the date field is still empty, which the
   // filters alone cannot say.
   const [customAdded, setCustomAdded] = useState(false)
 
-  // Unchecking "откликнулся" should not erase where the job stood before.
+  // Unchecking "applied" should not erase where the job stood before.
   const previous = useRef(new Map<string, JobStatus>())
 
   const {
@@ -270,7 +294,12 @@ export function Jobs({
         done += result.jobs.length
         setBatch({ done, total: ids.length })
       }
-      notify(`Пересчитан score у ${done} ${plural(done, ["вакансии", "вакансий", "вакансий"])}`)
+      notify(
+        t("Rescored {count} {noun}", {
+          count: done,
+          noun: plural(done, countForms(t, "job", "a few jobs", "jobs")),
+        }),
+      )
     } finally {
       setBatch(null)
     }
@@ -334,7 +363,7 @@ export function Jobs({
           <button
             type="button"
             className="icon-btn"
-            title="Пересчитать score"
+            title={t("Rescore")}
             disabled={Boolean(scoring === card.id || batch)}
             onClick={() => void rescore(card)}
           >
@@ -345,7 +374,7 @@ export function Jobs({
         {card.score_reason ? (
           <p className="muted">
             {card.score_reason === "prefilter"
-              ? "Отсеяна по названию: не прошла теги префильтра, в скоринг не попала"
+              ? t("Filtered out by title: it missed the prefilter tags and never reached scoring")
               : card.score_reason}
           </p>
         ) : null}
@@ -366,7 +395,7 @@ export function Jobs({
           value={filters.tier ?? ""}
           onChange={(event) => setFilters((prev) => ({ ...prev, tier: event.target.value || undefined }))}
         >
-          <option value="">Все</option>
+          <option value="">{t("All")}</option>
           <option value="watchlist">Watchlist</option>
           <option value="discovery">Discovery</option>
         </select>
@@ -376,11 +405,11 @@ export function Jobs({
           value={String(filters.min_score ?? 0)}
           onChange={(event) => setFilters((prev) => ({ ...prev, min_score: Number(event.target.value) }))}
         >
-          <option value="0">Все</option>
-          <option value="40">От 40</option>
-          <option value="50">От 50</option>
-          <option value="70">От 70</option>
-          <option value="85">От 85</option>
+          <option value="0">{t("All")}</option>
+          <option value="40">{t("From {score}", { score: 40 })}</option>
+          <option value="50">{t("From {score}", { score: 50 })}</option>
+          <option value="70">{t("From {score}", { score: 70 })}</option>
+          <option value="85">{t("From {score}", { score: 85 })}</option>
         </select>
 
         <select
@@ -397,8 +426,8 @@ export function Jobs({
             }))
           }}
         >
-          <option value="">По профилю</option>
-          <option value="any">Все</option>
+          <option value="">{t("On profile")}</option>
+          <option value="any">{t("All")}</option>
           {FILTER_STATUSES.map((item) => (
             <option key={item} value={item}>
               {STATUS_LABELS[item]}
@@ -413,11 +442,11 @@ export function Jobs({
             setFilters((prev) => ({ ...prev, ...markFlags(event.target.value as MarkFilter) }))
           }
         >
-          <option value="new">Новые</option>
-          <option value="applied">Подался</option>
-          <option value="later">Позже</option>
-          <option value="viewed">Смотрел</option>
-          <option value="">Все</option>
+          <option value="new">{t("New")}</option>
+          <option value="applied">{STATUS_LABELS.applied}</option>
+          <option value="later">{t("Later")}</option>
+          <option value="viewed">{t("Viewed")}</option>
+          <option value="">{t("All")}</option>
         </select>
 
         <select
@@ -433,19 +462,19 @@ export function Jobs({
             }))
           }}
         >
-          <option value="">Все</option>
-          <option value="1">Сегодня</option>
-          <option value="3">За 3 дня</option>
-          <option value="7">За неделю</option>
-          <option value="30">За месяц</option>
-          <option value="custom">С даты…</option>
+          <option value="">{t("All")}</option>
+          <option value="1">{t("Today")}</option>
+          <option value="3">{t("Last 3 days")}</option>
+          <option value="7">{t("Last week")}</option>
+          <option value="30">{t("Last month")}</option>
+          <option value="custom">{t("From a date…")}</option>
         </select>
 
         {addedMode === "custom" ? (
           <input
             className="input"
             type="date"
-            title="Добавлена не раньше этой даты"
+            title={t("Added no earlier than this date")}
             value={filters.added_from ?? ""}
             onChange={(event) =>
               setFilters((prev) => ({
@@ -461,17 +490,17 @@ export function Jobs({
           <button
             type="button"
             className="btn btn-sm"
-            title="Убрать фильтр по источнику"
+            title={t("Clear the source filter")}
             onClick={() =>
               setFilters((prev) => ({ ...prev, source_id: undefined, source_label: undefined }))
             }
           >
-            Источник: {filters.source_label ?? filters.source_id} ×
+            {t("Source: {name} ×", { name: filters.source_label ?? filters.source_id ?? "" })}
           </button>
         ) : null}
 
         <MultiSelect
-          label="Все"
+          label={t("All")}
           options={companies.map((item) => ({
             value: item.company_key,
             label: item.company,
@@ -485,14 +514,14 @@ export function Jobs({
       {jobs === null ? (
         <Skeletons />
       ) : jobs.length === 0 ? (
-        <Empty title="Ничего не нашлось" hint="Ослабьте фильтры или запустите прогон." />
+        <Empty title={t("Nothing found")} hint={t("Loosen the filters or start a run.")} />
       ) : (
         <>
           <div className="row">
-            <Count shown={jobs.length} forms={["вакансия", "вакансии", "вакансий"]}>
+            <Count shown={jobs.length} forms={countForms(t, "job", "a few jobs", "jobs")}>
               {filters.source_label ? ` · ${filters.source_label}` : ""}
-              {picked.length > 0 ? ` · компаний в фильтре: ${picked.length}` : ""}
-              {batch ? ` · считаю ${batch.done} из ${batch.total}` : ""}
+              {picked.length > 0 ? ` · ${t("{count} companies in the filter", { count: picked.length })}` : ""}
+              {batch ? ` · ${t("scoring {done} of {total}", { done: batch.done, total: batch.total })}` : ""}
             </Count>
             <button
               type="button"
@@ -500,7 +529,7 @@ export function Jobs({
               disabled={Boolean(scoring || batch)}
               onClick={() => void rescoreFiltered()}
             >
-              {batch ? "Считаю…" : "Пересчитать score у всех"}
+              {batch ? t("Scoring…") : t("Rescore all")}
             </button>
           </div>
 
@@ -510,37 +539,37 @@ export function Jobs({
                 <tr>
                   <SortHeader
                     column="applied"
-                    label="Подался"
+                    label={STATUS_LABELS.applied}
                     sort={sort}
                     dir={dir}
                     onSort={sortBy}
                     className="col-check"
-                    title="Отметьте, если откликнулись"
+                    title={t("Check this if you applied")}
                   />
                   <SortHeader
                     column="viewed"
-                    label="Смотрел"
+                    label={t("Viewed")}
                     sort={sort}
                     dir={dir}
                     onSort={sortBy}
                     className="col-check"
-                    title="Отметьте, если уже смотрели вакансию"
+                    title={t("Check this if you already viewed the job")}
                   />
                   <SortHeader
                     column="later"
-                    label="Позже"
+                    label={t("Later")}
                     sort={sort}
                     dir={dir}
                     onSort={sortBy}
                     className="col-check"
-                    title="Отложить, чтобы вернуться к вакансии"
+                    title={t("Set aside to come back to the job")}
                   />
-                  <SortHeader column="title" label="Вакансия" sort={sort} dir={dir} onSort={sortBy} />
-                  <SortHeader column="company" label="Компания" sort={sort} dir={dir} onSort={sortBy} className="col-company" />
+                  <SortHeader column="title" label={t("Job")} sort={sort} dir={dir} onSort={sortBy} />
+                  <SortHeader column="company" label={t("Company")} sort={sort} dir={dir} onSort={sortBy} className="col-company" />
                   <SortHeader column="score" label="Score" sort={sort} dir={dir} onSort={sortBy} className="col-score" />
                   <SortHeader
                     column="posted"
-                    label="Опубликована"
+                    label={t("Posted")}
                     sort={sort}
                     dir={dir}
                     onSort={sortBy}
@@ -548,21 +577,21 @@ export function Jobs({
                   />
                   <SortHeader
                     column="added"
-                    label="Добавлена"
+                    label={t("Added")}
                     sort={sort}
                     dir={dir}
                     onSort={sortBy}
                     className="col-date"
-                    title="Когда мы впервые увидели вакансию"
+                    title={t("When we first saw the job")}
                   />
                   <SortHeader
                     column="updated"
-                    label="Обновлена"
+                    label={t("Updated")}
                     sort={sort}
                     dir={dir}
                     onSort={sortBy}
                     className="col-date"
-                    title="Когда вакансия изменилась у источника"
+                    title={t("When the job changed at the source")}
                   />
                 </tr>
               </thead>
@@ -573,7 +602,7 @@ export function Jobs({
                   <Fragment key={job.id}>
                     <tr
                       className={`row-open ${job.viewed_at && !inPipeline(job) ? "is-viewed" : ""} ${inPipeline(job) ? "is-applied" : ""} ${scoring === job.id || batch ? "is-busy" : ""}`.trim()}
-                      title="Двойной клик — открыть карточку"
+                      title={t("Double-click to open the card")}
                       onDoubleClick={openOnDoubleClick(() => void openCard(job))}
                     >
                       <td className="col-check">
@@ -581,7 +610,7 @@ export function Jobs({
                           type="checkbox"
                           className="checkbox"
                           checked={inPipeline(job)}
-                          aria-label={`Откликнулся: ${job.title}`}
+                          aria-label={t("Applied: {title}", { title: job.title })}
                           onChange={() => void toggleApplied(job)}
                         />
                       </td>
@@ -590,7 +619,7 @@ export function Jobs({
                           type="checkbox"
                           className="checkbox"
                           checked={Boolean(job.viewed_at)}
-                          aria-label={`Просмотрено: ${job.title}`}
+                          aria-label={t("Viewed: {title}", { title: job.title })}
                           onChange={(event) => requestViewed(job, event.target.checked)}
                         />
                       </td>
@@ -599,7 +628,7 @@ export function Jobs({
                           type="checkbox"
                           className="checkbox"
                           checked={Boolean(job.later_at)}
-                          aria-label={`Посмотреть позже: ${job.title}`}
+                          aria-label={t("View later: {title}", { title: job.title })}
                           onChange={() => void toggleLater(job)}
                         />
                       </td>
@@ -617,7 +646,7 @@ export function Jobs({
                         <button
                           type="button"
                           className="cell-link"
-                          title={`Все вакансии ${job.company}`}
+                          title={t("All jobs at {company}", { company: job.company })}
                           onClick={() => onOpenCompany(job)}
                         >
                           {job.company}
@@ -627,13 +656,13 @@ export function Jobs({
                         <div className="score-cell">
                           <ScoreBadge
                             score={job.status === "off_profile" ? null : job.score}
-                            hint="Не оценивалась: название не подошло под профиль"
+                            hint={t("Not scored: the title didn't match the profile")}
                           />
                           <button
                             type="button"
                             className="icon-btn"
-                            title="Пересчитать score"
-                            aria-label={`Пересчитать score: ${job.title}`}
+                            title={t("Rescore")}
+                            aria-label={t("Rescore: {title}", { title: job.title })}
                             disabled={Boolean(scoring === job.id || batch)}
                             onClick={() => void rescore(job)}
                           >
@@ -643,7 +672,7 @@ export function Jobs({
                       </td>
                       <td className="col-date">
                         <Age value={job.posted_at ?? job.first_seen_at} />
-                        {job.posted_at ? null : <div className="cell-sub">найдена нами</div>}
+                        {job.posted_at ? null : <div className="cell-sub">{t("found by us")}</div>}
                       </td>
                       <td className="col-date">
                         <Age value={job.first_seen_at} warnAfter={14} />
@@ -665,30 +694,22 @@ export function Jobs({
         <ConfirmDialog
           title={
             pending.kind === "applied-off"
-              ? "Снять «подался»?"
+              ? t("Clear the applied mark?")
               : pending.next
-                ? "Пометить как просмотренную?"
-                : "Снять «просмотрено»?"
+                ? t("Mark as viewed?")
+                : t("Clear the viewed mark?")
           }
-          confirmLabel={pending.kind === "applied-off" || !pending.next ? "Да, снять" : "Да, смотрел"}
-          cancelLabel="Нет"
+          confirmLabel={pending.kind === "applied-off" || !pending.next ? t("Yes, clear it") : t("Yes, I viewed it")}
+          cancelLabel={t("No")}
           busy={confirming}
           onCancel={() => !confirming && setPending(null)}
           onConfirm={() => void confirmPending()}
         >
-          {pending.kind === "applied-off" ? (
-            <>
-              Вакансия <b>{pending.job.title}</b> пропадёт из раздела «Подался».
-            </>
-          ) : pending.next ? (
-            <>
-              <b>{pending.job.title}</b> получит признак «просмотрено».
-            </>
-          ) : (
-            <>
-              С <b>{pending.job.title}</b> снимется признак «просмотрено».
-            </>
-          )}
+          {pending.kind === "applied-off"
+            ? withTitle(t("The job {title} will leave Applied."), pending.job.title)
+            : pending.next
+              ? withTitle(t("{title} will be marked as viewed."), pending.job.title)
+              : withTitle(t("Viewed will be cleared from {title}."), pending.job.title)}
         </ConfirmDialog>
       ) : null}
     </>

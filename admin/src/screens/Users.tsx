@@ -3,8 +3,20 @@ import { useCallback, useState, type ReactNode } from "react"
 import { api } from "../api"
 import { useAction, useApp, useLoader } from "../app-context"
 import { Count, Empty, Skeletons } from "../components/common"
+import { getLang, useT } from "../i18n"
 import type { AuthUser, ManagedUser } from "../types"
 import { Profile } from "./Profile"
+
+/** English has one plural. Russian keeps the three forms the counter already asks for. */
+function countForms(
+  t: (english: string) => string,
+  one: string,
+  few: string,
+  many: string,
+): [string, string, string] {
+  if (getLang() !== "ru") return [one, many, many]
+  return [t(one), t(few), t(many)]
+}
 
 function Token({
   token,
@@ -17,19 +29,18 @@ function Token({
   onShow: () => void
   onCopy: (token: string) => void
 }) {
-  if (token === null) return <span className="cell-sub">вход по ADMIN_TOKEN</span>
+  const t = useT()
+  if (token === null) return <span className="cell-sub">{t("sign-in via ADMIN_TOKEN")}</span>
   return (
     <div className="row-tight">
-      <code className={`token-value${shown ? "" : " token-masked"}`}>
-        {shown ? token : "•".repeat(token.length)}
-      </code>
+      <code className={`token-value${shown ? "" : " token-masked"}`}>{shown ? token : "•".repeat(token.length)}</code>
       {shown ? (
         <button className="btn btn-ghost btn-sm" onClick={() => onCopy(token)}>
-          Копировать
+          {t("Copy")}
         </button>
       ) : (
         <button className="btn btn-ghost btn-sm" onClick={onShow}>
-          Показать
+          {t("Show")}
         </button>
       )}
     </div>
@@ -38,6 +49,7 @@ function Token({
 
 /** `header` sits above the user list and gives way to a user's profile when one is open. */
 export function Users({ header }: { header?: ReactNode } = {}) {
+  const t = useT()
   const run = useAction()
   const { me, notify } = useApp()
   const [users, setUsers] = useState<ManagedUser[] | null>(null)
@@ -61,7 +73,7 @@ export function Users({ header }: { header?: ReactNode } = {}) {
     const trimmed = name.trim()
     if (!trimmed) return
     setBusy(true)
-    const result = await run(() => api.createUser(trimmed), `${trimmed} создан`)
+    const result = await run(() => api.createUser(trimmed), t("{name} created", { name: trimmed }))
     setBusy(false)
     if (!result) return
     setName("")
@@ -71,7 +83,10 @@ export function Users({ header }: { header?: ReactNode } = {}) {
 
   async function toggleRole(user: ManagedUser) {
     const next = user.role === "master" ? "user" : "master"
-    const label = next === "master" ? `Сделать «${user.name}» мастером?` : `Снять мастера с «${user.name}»?`
+    const label =
+      next === "master"
+        ? t("Make \"{name}\" a master?", { name: user.name })
+        : t("Remove master from \"{name}\"?", { name: user.name })
     if (!confirm(label)) return
     const result = await run(() => api.updateUser(user.id, { role: next }))
     if (result) replace(result.user)
@@ -80,10 +95,10 @@ export function Users({ header }: { header?: ReactNode } = {}) {
   async function resetToken(user: ManagedUser) {
     const warning =
       user.id === me?.id
-        ? "Это ваш собственный токен — текущая сессия закроется, входить придётся уже новым."
-        : "Старый токен перестанет работать."
-    if (!confirm(`Перевыпустить токен для «${user.name}»? ${warning}`)) return
-    const result = await run(() => api.resetUserToken(user.id), "Новый токен выдан")
+        ? t("This is your own token — this session will close, and you will need the new one to sign in.")
+        : t("The old token will stop working.")
+    if (!confirm(t("Reissue the token for \"{name}\"? {warning}", { name: user.name, warning }))) return
+    const result = await run(() => api.resetUserToken(user.id), t("A new token was issued"))
     if (!result) return
     setShown((prev) => (prev.includes(user.id) ? prev : [...prev, user.id]))
     replace(result.user)
@@ -92,9 +107,9 @@ export function Users({ header }: { header?: ReactNode } = {}) {
   async function copy(token: string) {
     try {
       await navigator.clipboard.writeText(token)
-      notify("Токен скопирован", "ok")
+      notify(t("Token copied"), "ok")
     } catch {
-      notify("Буфер обмена недоступен, скопируйте вручную", "error")
+      notify(t("Clipboard unavailable, copy it manually"), "error")
     }
   }
 
@@ -103,7 +118,7 @@ export function Users({ header }: { header?: ReactNode } = {}) {
       <>
         <div className="row" style={{ marginBottom: 12 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setSubject(null)}>
-            ← К списку
+            {t("← Back to the list")}
           </button>
         </div>
         <Profile subject={{ id: subject.id, name: subject.name }} />
@@ -115,15 +130,14 @@ export function Users({ header }: { header?: ReactNode } = {}) {
     <>
       {header}
       <section className="card">
-        <h3 className="card-title">Новый пользователь</h3>
+        <h3 className="card-title">{t("New user")}</h3>
         <p className="card-sub">
-          Имя и личный токен. Токен остаётся в списке — его можно посмотреть и передать человеку в любой
-          момент.
+          {t("A name and a personal token. The token stays in the list — you can reveal it and pass it to the person at any time.")}
         </p>
         <div className="row">
           <input
             className="input grow"
-            placeholder="Имя"
+            placeholder={t("User name")}
             value={name}
             disabled={busy}
             onChange={(event) => setName(event.target.value)}
@@ -132,27 +146,27 @@ export function Users({ header }: { header?: ReactNode } = {}) {
             }}
           />
           <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={() => void create()}>
-            Создать
+            {t("Create")}
           </button>
         </div>
       </section>
 
       {users?.length ? (
-        <Count shown={users.length} forms={["пользователь", "пользователя", "пользователей"]} />
+        <Count shown={users.length} forms={countForms(t, "user", "a few users", "users")} />
       ) : null}
 
       {users === null ? (
         <Skeletons />
       ) : users.length === 0 ? (
-        <Empty title="Пользователей нет" hint="Создайте первого." />
+        <Empty title={t("No users yet")} hint={t("Create the first one.")} />
       ) : (
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Имя</th>
-                <th>Роль</th>
-                <th>Токен</th>
+                <th>{t("User name")}</th>
+                <th>{t("Role")}</th>
+                <th>{t("Token")}</th>
                 <th className="col-actions" />
               </tr>
             </thead>
@@ -162,7 +176,7 @@ export function Users({ header }: { header?: ReactNode } = {}) {
                   <td>{user.name}</td>
                   <td>
                     <span className={`badge ${user.role === "master" ? "badge-accent" : "badge-neutral"}`}>
-                      {user.role === "master" ? "мастер" : "пользователь"}
+                      {user.role === "master" ? t("master") : t("user")}
                     </span>
                   </td>
                   <td>
@@ -176,13 +190,13 @@ export function Users({ header }: { header?: ReactNode } = {}) {
                   <td className="col-actions">
                     <div className="row-tight">
                       <button className="btn btn-sm" onClick={() => setSubject(user)}>
-                        Настройки
+                        {t("Settings")}
                       </button>
                       <button className="btn btn-sm" onClick={() => void toggleRole(user)}>
-                        {user.role === "master" ? "Сделать пользователем" : "Сделать мастером"}
+                        {user.role === "master" ? t("Make user") : t("Make master")}
                       </button>
                       <button className="btn btn-sm" onClick={() => void resetToken(user)}>
-                        {user.token === null ? "Выдать токен" : "Перевыпустить"}
+                        {user.token === null ? t("Issue a token") : t("Reissue")}
                       </button>
                     </div>
                   </td>

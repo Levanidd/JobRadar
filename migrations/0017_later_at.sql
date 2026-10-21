@@ -1,4 +1,4 @@
--- "Посмотреть позже" is a mark on a posting, not a stage it moves through, so
+-- "Look at later" is a mark on a posting, not a stage it moves through, so
 -- it gets a column of its own instead of another value in status: a job put
 -- aside for later keeps whatever the machine already knew about it and still
 -- reaches the digest.

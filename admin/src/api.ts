@@ -1,3 +1,4 @@
+import { getLang } from "./i18n"
 import type {
   AutoRunSchedule,
   Cycle,
@@ -39,7 +40,7 @@ let token = sessionStorage.getItem(STORAGE_KEY) ?? ""
 
 export class UnauthorizedError extends Error {
   constructor() {
-    super("Неверный токен")
+    super("Invalid token")
   }
 }
 
@@ -71,6 +72,7 @@ export function forgetToken(): void {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set("Authorization", `Bearer ${token}`)
+  headers.set("Accept-Language", getLang())
   if (init?.body) headers.set("Content-Type", "application/json")
 
   const res = await fetch(`/api${path}`, { ...init, headers })
@@ -81,7 +83,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const message =
       payload && typeof payload === "object" && "error" in payload
         ? String((payload as { error: unknown }).error)
-        : `Ошибка ${res.status}`
+        : `Error ${res.status}`
     throw new ApiError(message, res.status, payload)
   }
   return payload as T
@@ -501,7 +503,7 @@ export const api = {
   async downloadLabCsv(id: number): Promise<void> {
     const res = await fetch(`/api/lab/runs/${id}/export.csv`, { headers: { Authorization: `Bearer ${token}` } })
     if (res.status === 401) throw new UnauthorizedError()
-    if (!res.ok) throw new Error(`Ошибка ${res.status}`)
+    if (!res.ok) throw new Error(`Error ${res.status}`)
     const url = URL.createObjectURL(await res.blob())
     const link = document.createElement("a")
     link.href = url

@@ -12,7 +12,7 @@ binding = "DB"
 database_name = "job-scout"
 database_id = "111a2873-66df-4e82-850f-4b812282577e"
 
-# Manual start: admin "Прогнать" → POST /api/run. Every minute cron continues
+# Manual start: admin "Run" → POST /api/run. Every minute cron continues
 # a cycle that waitUntil dropped mid-walk (25s without progress), and starts
 # one when a slot of the master's auto-run schedule comes due (src/schedule.ts).
 [triggers]

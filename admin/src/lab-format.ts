@@ -1,19 +1,41 @@
 import { plural } from "./components/common"
+import { getLang } from "./i18n"
 import type { LabCandidateInput, LabStatus, LabStratum, ThinkingLevel } from "./types"
 
+function pick(copy: { en: string; ru: string }): string {
+  return copy[getLang()]
+}
+
+function status(copy: { en: string; ru: string }, tone: string): { label: string; tone: string } {
+  return {
+    get label() {
+      return pick(copy)
+    },
+    tone,
+  }
+}
+
 export const LAB_STATUS: Record<LabStatus, { label: string; tone: string }> = {
-  queued: { label: "В очереди", tone: "neutral" },
-  running: { label: "Идёт", tone: "accent" },
-  done: { label: "Готово", tone: "positive" },
-  error: { label: "Ошибка", tone: "negative" },
-  cancelled: { label: "Отменён", tone: "warning" },
+  queued: status({ en: "Queued", ru: "В очереди" }, "neutral"),
+  running: status({ en: "Running", ru: "Идёт" }, "accent"),
+  done: status({ en: "Done", ru: "Готово" }, "positive"),
+  error: status({ en: "Error", ru: "Ошибка" }, "negative"),
+  cancelled: status({ en: "Cancelled", ru: "Отменён" }, "warning"),
 }
 
 export const STRATUM_LABEL: Record<LabStratum, string> = {
-  "0-39": "0–39",
-  "40-69": "40–69",
-  "70-100": "70–100",
-  labeled: "размечено",
+  get "0-39"() {
+    return pick({ en: "0–39", ru: "0–39" })
+  },
+  get "40-69"() {
+    return pick({ en: "40–69", ru: "40–69" })
+  },
+  get "70-100"() {
+    return pick({ en: "70–100", ru: "70–100" })
+  },
+  get labeled() {
+    return pick({ en: "labeled", ru: "размечено" })
+  },
 }
 
 /** Statuses a person set by hand: the only postings with a real decision behind them. */
@@ -23,14 +45,30 @@ export const PING_THRESHOLD = 70
 
 /** Fits a matrix cell; the full message stays in the tooltip and the posting panel. */
 export const ERROR_SHORT: Record<string, string> = {
-  malformed_json: "JSON",
-  missing_score: "нет score",
-  empty: "пусто",
-  http_429: "429",
-  http_5xx: "5xx",
-  http_4xx: "4xx",
-  timeout: "таймаут",
-  error: "ошибка",
+  get malformed_json() {
+    return pick({ en: "JSON", ru: "JSON" })
+  },
+  get missing_score() {
+    return pick({ en: "no score", ru: "нет score" })
+  },
+  get empty() {
+    return pick({ en: "empty", ru: "пусто" })
+  },
+  get http_429() {
+    return pick({ en: "429", ru: "429" })
+  },
+  get http_5xx() {
+    return pick({ en: "5xx", ru: "5xx" })
+  },
+  get http_4xx() {
+    return pick({ en: "4xx", ru: "4xx" })
+  },
+  get timeout() {
+    return pick({ en: "timeout", ru: "таймаут" })
+  },
+  get error() {
+    return pick({ en: "error", ru: "ошибка" })
+  },
 }
 
 /** What a clone starts from: the source's models, and its postings on the server side. */
@@ -57,13 +95,23 @@ export function candidateName(candidate: { model: string; thinking_level: Thinki
   return candidate.thinking_level ? `${name} · ${candidate.thinking_level.toLowerCase()}` : name
 }
 
-/** `4 вакансии × 1 модель × 3 повтора`, with the right ending for each count. */
+const RUN_NOUN = {
+  jobs: { en: ["posting", "postings"], ru: ["вакансия", "вакансии", "вакансий"] },
+  models: { en: ["model", "models"], ru: ["модель", "модели", "моделей"] },
+  repeats: { en: ["repeat", "repeats"], ru: ["повтор", "повтора", "повторов"] },
+} as const
+
+function countNoun(count: number, copy: (typeof RUN_NOUN)[keyof typeof RUN_NOUN]): string {
+  const forms = copy[getLang()]
+  if (forms.length === 3) return `${count} ${plural(count, [forms[0], forms[1], forms[2]])}`
+  return `${count} ${count === 1 ? forms[0] : forms[1]}`
+}
+
+/** `4 postings × 1 model × 3 repeats`, with the right ending for each count. */
 export function runSize(jobs: number, models: number, repeats: number): string {
-  return [
-    `${jobs} ${plural(jobs, ["вакансия", "вакансии", "вакансий"])}`,
-    `${models} ${plural(models, ["модель", "модели", "моделей"])}`,
-    `${repeats} ${plural(repeats, ["повтор", "повтора", "повторов"])}`,
-  ].join(" × ")
+  return [countNoun(jobs, RUN_NOUN.jobs), countNoun(models, RUN_NOUN.models), countNoun(repeats, RUN_NOUN.repeats)].join(
+    " × ",
+  )
 }
 
 /** Lab sums are often fractions of a cent, so small values keep more digits. */
@@ -73,25 +121,39 @@ export function usd(value: number | null | undefined): string {
   return `$${value.toFixed(digits)}`
 }
 
+function numberLocale(): string {
+  return { en: "en-GB", ru: "ru-RU" }[getLang()]
+}
+
 export function percent(value: number | null): string {
   if (value === null) return "—"
-  return `${(value * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`
+  return `${(value * 100).toLocaleString(numberLocale(), { maximumFractionDigits: 1 })}%`
 }
 
 export function decimal(value: number | null, digits = 1): string {
   if (value === null) return "—"
-  return value.toLocaleString("ru-RU", { maximumFractionDigits: digits })
+  return value.toLocaleString(numberLocale(), { maximumFractionDigits: digits })
 }
+
+const UNIT = {
+  ms: { en: "ms", ru: "мс" },
+  s: { en: "s", ru: "с" },
+  min: { en: "min", ru: "мин" },
+  h: { en: "h", ru: "ч" },
+} as const
 
 export function ms(value: number | null): string {
   if (value === null) return "—"
-  return value < 1000 ? `${Math.round(value)} мс` : `${(value / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} с`
+  const lang = getLang()
+  return value < 1000
+    ? `${Math.round(value)} ${UNIT.ms[lang]}`
+    : `${(value / 1000).toLocaleString(numberLocale(), { maximumFractionDigits: 1 })} ${UNIT.s[lang]}`
 }
 
 export function compactTokens(value: number | null): string {
   if (value === null) return "—"
-  if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}M`
-  if (value >= 1000) return `${(value / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}K`
+  if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString(numberLocale(), { maximumFractionDigits: 1 })}M`
+  if (value >= 1000) return `${(value / 1000).toLocaleString(numberLocale(), { maximumFractionDigits: 1 })}K`
   return String(Math.round(value))
 }
 
@@ -103,8 +165,11 @@ export function signed(value: number): string {
 export function elapsed(fromMs: number, toMs: number): string {
   const seconds = Math.max(0, Math.round((toMs - fromMs) / 1000))
   const minutes = Math.floor(seconds / 60)
-  if (minutes >= 60) return `${Math.floor(minutes / 60)} ч ${minutes % 60} мин`
-  return minutes > 0 ? `${minutes} мин ${seconds % 60} с` : `${seconds} с`
+  const lang = getLang()
+  if (minutes >= 60) return `${Math.floor(minutes / 60)} ${UNIT.h[lang]} ${minutes % 60} ${UNIT.min[lang]}`
+  return minutes > 0
+    ? `${minutes} ${UNIT.min[lang]} ${seconds % 60} ${UNIT.s[lang]}`
+    : `${seconds} ${UNIT.s[lang]}`
 }
 
 export function randomSeed(): number {

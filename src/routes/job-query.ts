@@ -107,7 +107,7 @@ export async function jobFilters(c: Ctx, withCompanies: boolean): Promise<Where>
   if (later === "yes") clauses.push("uj.later_at IS NOT NULL")
   if (later === "no") clauses.push("uj.later_at IS NULL")
 
-  // A rejection keeps applied_at, so "куда подался" still covers the ones that
+  // A rejection keeps applied_at, so the applied list still covers the ones that
   // came to nothing — which is the point of asking.
   const applied = c.req.query("applied")
   if (applied === "yes") clauses.push("uj.applied_at IS NOT NULL")
@@ -128,7 +128,7 @@ export async function appliedFilters(c: Ctx): Promise<Where> {
   if (status === "applied") {
     clauses.push("uj.status = 'applied'")
   } else if (status === "interview") {
-    // A rejection after an interview still belongs here: that is the собес.
+    // A rejection after an interview still belongs here: that was an interview.
     clauses.push("(uj.status = 'interview' OR uj.interviewed_at IS NOT NULL)")
   } else if (status === "rejected") {
     clauses.push("uj.status = 'rejected'")

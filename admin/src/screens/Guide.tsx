@@ -2,6 +2,8 @@ import type { ReactNode } from "react"
 
 import { useApp } from "../app-context"
 import { DocumentIcon, PlusIcon, RefreshIcon } from "../components/icons"
+import { statusLabel } from "../components/JobCard"
+import { useT } from "../i18n"
 
 /**
  * Callout colours are deliberately none of the app's own: the buttons being
@@ -42,61 +44,69 @@ function Shot({ legend, children }: { legend: string[]; children: ReactNode }) {
 }
 
 export function Guide() {
+  const t = useT()
   const { me } = useApp()
   const master = me?.role === "master"
   return (
     <div className="guide">
       <section className="card">
-        <h3 className="card-title">Как работать</h3>
+        <h3 className="card-title">{t("How to use it")}</h3>
         <p className="card-sub">
-          Вакансии и источники общие для всех. Оценки, фильтры, отклики и скрытое — только ваши. Сначала
-          настройте профиль, потом соберите вакансии, потом разбирайте ленту.
+          {t(
+            "Postings and sources are shared. Scores, filters, applications, and hidden items are yours alone. Set up your profile first, then collect postings, then work through the feed.",
+          )}
         </p>
       </section>
 
       <section className="card">
-        <h3 className="card-title">1. Собрать свежие вакансии</h3>
+        <h3 className="card-title">{t("1. Collect fresh postings")}</h3>
         <p className="card-sub">
-          Источники обходятся сами по расписанию несколько раз в день — обычно этого хватает. Score ставится по
-          вашему профилю, чужие оценки не меняются. Если прогон уже идёт, нажатие присоединит вас к нему: score
-          для вас посчитается сразу после текущего.
+          {t(
+            "Sources are crawled on a schedule several times a day — that is usually enough. The score uses your profile; other people's scores stay as they are. If a run is already going, pressing the button joins it: your score is calculated right after the current one.",
+          )}
         </p>
         <Shot
           legend={[
             master
-              ? "«Прогнать» — обойти все источники, которые не обновлялись 3 часа, и посчитать score. Идёт на сервере, вкладку можно закрыть"
-              : "«Прогнать» — докачать источники, которые пропустил автопрогон или где была ошибка, и посчитать score для ваших новых вакансий. Идёт на сервере, вкладку можно закрыть",
-            "«Обновить» — перечитать уже собранное, без обхода",
+              ? t(
+                  "“Run” crawls every source that has not been updated in 3 hours and calculates scores. It runs on the server, so you can close the tab",
+                )
+              : t(
+                  "“Run” fetches sources the automatic run missed or that failed, and scores your new postings. It runs on the server, so you can close the tab",
+                ),
+            t("“Refresh” reloads what is already collected, without a crawl"),
           ]}
         >
           <div className="guide-chrome">
             <strong className="guide-brand">JobRadar</strong>
-            <span className="muted">Анна</span>
+            <span className="muted">{t("Anna")}</span>
             <Hit n={1}>
-              <span className="btn btn-primary btn-sm">Прогнать</span>
+              <span className="btn btn-primary btn-sm">{t("Run")}</span>
             </Hit>
             <Hit n={2}>
-              <span className="btn btn-ghost btn-sm">Обновить</span>
+              <span className="btn btn-ghost btn-sm">{t("Refresh")}</span>
             </Hit>
           </div>
         </Shot>
       </section>
 
       <section className="card">
-        <h3 className="card-title">2. Настроить, что вам подходит</h3>
-        <p className="card-sub">Вкладка «Профиль». Всё здесь — только про вас.</p>
+        <h3 className="card-title">{t("2. Set what fits you")}</h3>
+        <p className="card-sub">{t("The Profile tab. Everything here is only about you.")}</p>
         <Shot
           legend={[
-            "Теги «должно содержать»: без совпадения вакансия даже не дойдёт до модели",
-            "Теги «не должно»: одно совпадение — и вакансия отсеяна",
-            "Чёрный список: компания скрыта у вас, у остальных остаётся",
-            "Текст профиля уходит в скоринг — это единственная ручка калибровки. После правки — «Пересчитать»",
-            "«Скачать промпт для профиля» копирует промпт в буфер: вставьте его в Claude или ChatGPT вместе с резюме — ассистент расспросит вас и поможет собрать текст профиля",
+            t("“Must contain” tags: without a match the posting never reaches the model"),
+            t("“Must not contain” tags: one match and the posting is dropped"),
+            t("Block list: the company is hidden for you and stays visible for everyone else"),
+            t("The profile text is what scoring sees — the only calibration control. After editing, use “Recalculate”"),
+            t(
+              "“Download the profile prompt” copies the prompt. Paste it into Claude or ChatGPT with your résumé — the assistant will ask questions and help you write the profile text",
+            ),
           ]}
         >
           <div className="guide-stack">
             <div className="guide-mini-card">
-              <span className="guide-mini-title">Префильтр по названию</span>
+              <span className="guide-mini-title">{t("Title prefilter")}</span>
               <div className="guide-tags">
                 <Hit n={1}>
                   <span className="tag tag-keep">product manager</span>
@@ -106,26 +116,26 @@ export function Guide() {
                   <span className="tag tag-drop">intern</span>
                 </Hit>
               </div>
-              <span className="btn btn-primary btn-sm">Сохранить теги</span>
+              <span className="btn btn-primary btn-sm">{t("Save tags")}</span>
             </div>
 
             <div className="guide-mini-card">
-              <span className="guide-mini-title">Чёрный список компаний</span>
+              <span className="guide-mini-title">{t("Company block list")}</span>
               <Hit n={3}>
                 <span className="tag tag-drop">Acme ×</span>
               </Hit>
             </div>
 
             <div className="guide-mini-card">
-              <span className="guide-mini-title">Профиль для скоринга</span>
+              <span className="guide-mini-title">{t("Profile for scoring")}</span>
               <Hit n={4}>
-                <span className="guide-textarea">Senior PM, B2B SaaS, Berlin или remote EU…</span>
+                <span className="guide-textarea">{t("Senior PM, B2B SaaS, Berlin or remote EU…")}</span>
               </Hit>
               <div className="guide-row">
-                <span className="btn btn-primary btn-sm">Сохранить</span>
-                <span className="btn btn-sm">Пересчитать</span>
+                <span className="btn btn-primary btn-sm">{t("Save")}</span>
+                <span className="btn btn-sm">{t("Recalculate")}</span>
                 <Hit n={5}>
-                  <span className="btn btn-sm">Скачать промпт для профиля</span>
+                  <span className="btn btn-sm">{t("Download the profile prompt")}</span>
                 </Hit>
               </div>
             </div>
@@ -134,34 +144,34 @@ export function Guide() {
       </section>
 
       <section className="card">
-        <h3 className="card-title">3. Добавить компанию</h3>
-        <p className="card-sub">«Ресурсы» → «Источники». Доска, которую вы добавили, появляется у всех.</p>
+        <h3 className="card-title">{t("3. Add a company")}</h3>
+        <p className="card-sub">{t("Resources → Sources. A board you add shows up for everyone.")}</p>
         <Shot
           legend={[
-            "Ссылки на карьерные страницы — одна или сразу несколько, по одной на строку. ATS определится сам",
-            "«Добавить»: проверит каждую ссылку и подключит доску. Что не опознано — останется в поле",
-            "«Прогнать» на строке — обойти только эту доску, не запуская весь цикл",
+            t("Career page links — one or several, one per line. The ATS is detected automatically"),
+            t("“Add” checks each link and connects the board. Anything it does not recognize stays in the field"),
+            t("“Run” on a row crawls only that board, without starting the full cycle"),
           ]}
         >
           <div className="guide-stack">
             <div className="guide-pills">
               <span className="guide-pill">Discovery</span>
-              {master ? <span className="guide-pill">Исследовать</span> : null}
-              <span className="guide-pill is-on">Источники</span>
+              {master ? <span className="guide-pill">{t("Explore")}</span> : null}
+              <span className="guide-pill is-on">{t("Sources")}</span>
             </div>
             <Hit n={1}>
               <span className="guide-textarea">https://jobs.lever.co/company</span>
             </Hit>
             <div className="guide-row">
               <Hit n={2}>
-                <span className="btn btn-primary btn-sm">Добавить</span>
+                <span className="btn btn-primary btn-sm">{t("Add")}</span>
               </Hit>
             </div>
             <div className="guide-source-row">
               <strong>Acme</strong>
-              <span className="badge badge-neutral">12 вакансий</span>
+              <span className="badge badge-neutral">{t("12 postings")}</span>
               <Hit n={3}>
-                <span className="btn btn-sm">Прогнать</span>
+                <span className="btn btn-sm">{t("Run")}</span>
               </Hit>
             </div>
           </div>
@@ -169,26 +179,27 @@ export function Guide() {
       </section>
 
       <section className="card">
-        <h3 className="card-title">4. Разобрать ленту</h3>
+        <h3 className="card-title">{t("4. Work through the feed")}</h3>
         <p className="card-sub">
-          «Вакансии». По умолчанию видно то, что прошло ваш префильтр, со score от 50. Двойной клик по строке
-          открывает карточку вакансии — о ней следующий шаг.
+          {t(
+            "Jobs. By default you see what passed your prefilter, with a score of 50 or more. Double-click a row to open the posting — that is the next step.",
+          )}
         </p>
         <Shot
           legend={[
-            "«Подался» — отметка уходит во вкладку «Подался» и в статистику",
-            "«Смотрел» — чтобы отличать разобранное от нового",
-            "«Позже» — отложить, не меняя статус вакансии",
-            "Клик по компании — все её вакансии, какие у нас есть",
-            "Score: насколько вакансия близка вашему профилю. Иконка рядом — пересчитать его",
+            t("“Applied” marks it and sends it to the Applied tab and to stats"),
+            t("“Viewed” separates what you have already reviewed from what is new"),
+            t("“Later” sets it aside without changing the posting status"),
+            t("Click the company for every posting of theirs we have"),
+            t("Score: how close the posting is to your profile. The icon next to it rescores it"),
           ]}
         >
           <div className="guide-table">
             <div className="guide-thead">
-              <span>Подался</span>
-              <span>Смотрел</span>
-              <span>Позже</span>
-              <span>Вакансия</span>
+              <span>{statusLabel("applied")}</span>
+              <span>{t("Viewed")}</span>
+              <span>{t("Later")}</span>
+              <span>{t("Posting")}</span>
               <span>Score</span>
             </div>
             <div className="guide-trow">
@@ -221,18 +232,21 @@ export function Guide() {
       </section>
 
       <section className="card">
-        <h3 className="card-title">5. Карточка вакансии</h3>
+        <h3 className="card-title">{t("5. The posting card")}</h3>
         <p className="card-sub">
-          Двойной клик по строке во «Вакансиях» или «Подался». Слева — тот же список: по нему можно переходить
-          между вакансиями, не возвращаясь назад.
+          {t(
+            "Double-click a row in Jobs or Applied. The same list stays on the left, so you can move between postings without going back.",
+          )}
         </p>
         <Shot
           legend={[
-            "Статус — рядом с названием. Иконка документа открывает CV, которое ушло на эту вакансию",
-            "Название компании — все её вакансии, какие у нас есть",
-            "Новая вакансия: «Подался», «Посмотрел», «Позже». После отклика — «Интервью» и «Отказ». Повторное нажатие отменяет шаг",
-            "Этапы интервью: «+» добавляет этап с датой, карандаш и корзина — правка и удаление",
-            "Заметки видите только вы. Комментарий Claude и ссылку на CV записывает Claude через API",
+            t("The status sits next to the title. The document icon opens the CV sent for this posting"),
+            t("The company name opens every posting of theirs we have"),
+            t(
+              "A new posting: “Applied”, “Mark viewed”, “Later”. After you apply: “Interview” and “Rejected”. Press again to undo the step",
+            ),
+            t("Interview stages: “+” adds a stage with a date, the pencil and the trash can edit and delete it"),
+            t("Only you see notes. Claude writes the Claude comment and the CV link through the API"),
           ]}
         >
           <div className="guide-stack">
@@ -243,7 +257,7 @@ export function Guide() {
                   <span className="icon-btn">
                     <DocumentIcon />
                   </span>
-                  <span className="badge badge-positive">Интервью</span>
+                  <span className="badge badge-positive">{statusLabel("interview")}</span>
                 </span>
               </Hit>
             </div>
@@ -252,54 +266,52 @@ export function Guide() {
             </Hit>
             <Hit n={3}>
               <span className="guide-row">
-                <span className="btn btn-primary btn-sm">Интервью</span>
-                <span className="btn btn-sm">Отказ</span>
+                <span className="btn btn-primary btn-sm">{statusLabel("interview")}</span>
+                <span className="btn btn-sm">{statusLabel("rejected")}</span>
               </span>
             </Hit>
             <div className="guide-mini-card">
               <span className="guide-row">
-                <span className="guide-mini-title">Этапы интервью · 2</span>
+                <span className="guide-mini-title">{t("Interview stages · 2")}</span>
                 <Hit n={4}>
                   <span className="icon-btn">
                     <PlusIcon />
                   </span>
                 </Hit>
               </span>
-              <span className="muted">HR-скрининг · 3 мар.</span>
-              <span className="muted">Техническое интервью · 10 мар.</span>
+              <span className="muted">{t("HR screen · 3 Mar")}</span>
+              <span className="muted">{t("Technical interview · 10 Mar")}</span>
             </div>
             <Hit n={5}>
-              <span className="guide-textarea">Отправила CV 3 марта, ждут ответ рекрутера…</span>
+              <span className="guide-textarea">{t("Sent the CV on 3 March, waiting for the recruiter…")}</span>
             </Hit>
           </div>
         </Shot>
       </section>
 
       <section className="card">
-        <h3 className="card-title">6. Вести отклики</h3>
-        <p className="card-sub">
-          «Подался» — только то, куда отметились вы. «Статистика» считает вашу воронку, не общую.
-        </p>
+        <h3 className="card-title">{t("6. Track applications")}</h3>
+        <p className="card-sub">{t("Applied is only what you marked. Stats counts your funnel, not everyone's.")}</p>
         <Shot
           legend={[
-            "Фильтр по этапу: все, подался, интервью, отказ",
-            "Клик по компании — все её вакансии, какие у нас есть",
-            "Этап, этапы интервью и заметки меняются в карточке — двойной клик по строке",
-            "«Добавить вакансию» — если откликнулись на позицию, которой нет в источниках",
+            t("Filter by stage: all, applied, interview, rejected"),
+            t("Click the company for every posting of theirs we have"),
+            t("Stage, interview stages, and notes change on the card — double-click the row"),
+            t("“Add posting” — if you applied to a role that is not in the sources"),
           ]}
         >
           <div className="guide-stack">
             <div className="guide-row">
               <Hit n={1}>
                 <span className="guide-pills">
-                  <span className="guide-pill is-on">Все</span>
-                  <span className="guide-pill">Подался</span>
-                  <span className="guide-pill">Интервью</span>
-                  <span className="guide-pill">Отказ</span>
+                  <span className="guide-pill is-on">{t("All")}</span>
+                  <span className="guide-pill">{statusLabel("applied")}</span>
+                  <span className="guide-pill">{statusLabel("interview")}</span>
+                  <span className="guide-pill">{statusLabel("rejected")}</span>
                 </span>
               </Hit>
               <Hit n={4}>
-                <span className="btn btn-primary btn-sm">Добавить вакансию</span>
+                <span className="btn btn-primary btn-sm">{t("Add posting")}</span>
               </Hit>
             </div>
             <div className="guide-source-row">
@@ -308,7 +320,7 @@ export function Guide() {
                 <span className="cell-sub">Beispiel Bank</span>
               </Hit>
               <Hit n={3}>
-                <span className="badge badge-neutral">Интервью</span>
+                <span className="badge badge-neutral">{statusLabel("interview")}</span>
               </Hit>
             </div>
           </div>
@@ -317,26 +329,26 @@ export function Guide() {
 
       {master ? (
         <section className="card">
-          <h3 className="card-title">7. Сравнить модели в «Лаборатории»</h3>
+          <h3 className="card-title">{t("7. Compare models in the Lab")}</h3>
           <p className="card-sub">
-            Перед сменой модели скоринга. Лаборатория берёт уже оценённые вакансии выбранного профиля, прогоняет каждую
-            через несколько моделей (до 6) по 1–5 раз и кладёт ответы рядом с оценкой из базы. Вакансии, оценки и
-            настройки не меняются; расход виден в «Настройках» → «Запросы к модели» одним пакетом «Лаборатория».
+            {t(
+              "Before changing the scoring model. The lab takes postings that already have a score for the chosen profile, runs each one through several models (up to 6) 1–5 times, and lays the answers next to the score from the database. Postings, scores, and settings do not change; the spend shows up in Settings → Model requests as one “Lab” batch.",
+            )}
           </p>
           <Shot
             legend={[
-              "Baseline — оценка текущего скорера из базы. Это не истина, а точка отсчёта",
-              "Скоры повторов одной модели. Разные числа — модель нестабильна на этой вакансии",
-              "Δ — среднее модели минус baseline; ⚠ flip — повторы по разные стороны порога 70",
-              "Фильтры: только расхождения, только ошибки, только размеченные вами вакансии",
+              t("Baseline is the current scorer's score from the database. It is a reference point, not the truth"),
+              t("Scores from one model's repeats. Different numbers mean the model is unstable on this posting"),
+              t("Δ is the model mean minus the baseline; ⚠ flip means repeats landed on opposite sides of the 70 threshold"),
+              t("Filters: only disagreements, only errors, only postings you labeled"),
             ]}
           >
             <div className="guide-stack">
               <div className="guide-row">
                 <Hit n={4}>
                   <span className="guide-pills">
-                    <span className="guide-pill is-on">Только расхождения</span>
-                    <span className="guide-pill">Только с ошибками</span>
+                    <span className="guide-pill is-on">{t("Only disagreements")}</span>
+                    <span className="guide-pill">{t("Only with errors")}</span>
                   </span>
                 </Hit>
               </div>
@@ -362,9 +374,9 @@ export function Guide() {
             </div>
           </Shot>
           <p className="card-sub">
-            Начните с 10 вакансий, 3–4 моделей и 3 повторов. Модель лучше текущей, если у неё низкие MAE и SD, flip
-            около нуля и высокий recall на размеченных — при приемлемой цене за вакансию. «Клонировать» прогоняет те
-            же вакансии с тем же снапшотом профиля через другой набор моделей.
+            {t(
+              "Start with 10 postings, 3–4 models, and 3 repeats. A model beats the current one when MAE and SD are low, flip is near zero, and recall on labeled postings is high — at an acceptable price per posting. “Clone” runs the same postings and the same profile snapshot through a different set of models.",
+            )}
           </p>
         </section>
       ) : null}

@@ -14,6 +14,7 @@ import { Resources } from "./screens/Resources"
 import { Settings } from "./screens/Settings"
 import { Stats } from "./screens/Stats"
 import { TokenGate } from "./screens/TokenGate"
+import { LanguageSwitch, useLang, useT } from "./i18n"
 import type { AuthUser, Cycle } from "./types"
 
 type TabId = "resources" | "jobs" | "applied" | "stats" | "profile" | "settings" | "lab" | "guide"
@@ -26,14 +27,14 @@ const TABS: Array<{
   icon: ComponentType<{ className?: string }>
   master?: boolean
 }> = [
-  { id: "resources", label: "Ресурсы", icon: StackIcon },
-  { id: "jobs", label: "Вакансии", icon: BriefcaseIcon },
-  { id: "applied", label: "Подался", icon: CheckIcon },
-  { id: "stats", label: "Статистика", icon: ChartIcon },
-  { id: "profile", label: "Профиль", icon: PersonIcon },
-  { id: "settings", label: "Настройки", icon: GearIcon, master: true },
-  { id: "lab", label: "Лаборатория", short: "Лаб", icon: FlaskIcon, master: true },
-  { id: "guide", label: "Инструкция", icon: BookIcon },
+  { id: "resources", label: "Resources", icon: StackIcon },
+  { id: "jobs", label: "Jobs", icon: BriefcaseIcon },
+  { id: "applied", label: "Applied", icon: CheckIcon },
+  { id: "stats", label: "Stats", icon: ChartIcon },
+  { id: "profile", label: "Profile", icon: PersonIcon },
+  { id: "settings", label: "Settings", icon: GearIcon, master: true },
+  { id: "lab", label: "Lab", short: "Lab", icon: FlaskIcon, master: true },
+  { id: "guide", label: "Guide", icon: BookIcon },
 ]
 
 /** `#lab/12` opens run 12 of the lab; the part after the slash belongs to the tab. */
@@ -57,16 +58,27 @@ function toRunState(cycle: Cycle): RunState {
   }
 }
 
-function doneMessage(cycle: Cycle): string {
+function doneMessage(cycle: Cycle, t: (english: string, vars?: Record<string, string | number>) => string): string {
   if (cycle.source_total === 0) {
     return cycle.scored || cycle.notified
-      ? `Источники за последние 3 часа уже пройдены. Оценено ${cycle.scored}, отправлено ${cycle.notified}`
-      : "Источники за последние 3 часа уже пройдены. Повторный обход — позже или по кнопке на карточке источника."
+      ? t("Boards from the last 3 hours are already done. Scored {scored}, sent {notified}", {
+          scored: cycle.scored,
+          notified: cycle.notified,
+        })
+      : t("Boards from the last 3 hours are already done. Run again later, or from a source card.")
   }
-  return `Источников ${cycle.source_total}, вакансий ${cycle.found} (новых ${cycle.fresh}), оценено ${cycle.scored}, отправлено ${cycle.notified}`
+  return t("Sources {sources}, postings {found} ({fresh} new), scored {scored}, sent {notified}", {
+    sources: cycle.source_total,
+    found: cycle.found,
+    fresh: cycle.fresh,
+    scored: cycle.scored,
+    notified: cycle.notified,
+  })
 }
 
 export default function App() {
+  useLang()
+  const t = useT()
   const [authorized, setAuthorized] = useState(() => Boolean(getToken()))
   const [me, setMe] = useState<AuthUser | null>(null)
   const [tab, setTab] = useState<TabId>(tabFromHash)
@@ -107,14 +119,14 @@ export default function App() {
       setRunning(false)
       setRun(null)
       if (watched && cycle.status === "done") {
-        notify(doneMessage(cycle), "ok")
+        notify(doneMessage(cycle, t), "ok")
         setRefreshTick((n) => n + 1)
         setSourcesTick((n) => n + 1)
       } else if (watched && cycle.status === "error") {
-        notify(cycle.error || "Прогон оборвался", "error")
+        notify(cycle.error || t("The run stopped"), "error")
       }
     },
-    [notify],
+    [notify, t],
   )
 
   const applyCycle = useCallback(
@@ -231,19 +243,20 @@ export default function App() {
           <h1>JobRadar</h1>
           <div className="header-actions">
             {me ? <span className="muted">{me.name}</span> : null}
+            <LanguageSwitch />
             <button
               className="btn btn-primary btn-sm"
               disabled={running}
-              title="Идёт на сервере. Пропускает доски, которые успешно прошли за последние 3 часа"
+              title={t("Runs on the server. Skips boards that succeeded in the last 3 hours")}
               onClick={() => void startCycle()}
             >
-              {running ? "Идёт прогон…" : "Прогнать"}
+              {running ? t("Running…") : t("Run")}
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setRefreshTick((n) => n + 1)}>
-              Обновить
+              {t("Refresh")}
             </button>
             <button className="btn btn-ghost btn-sm" onClick={logout}>
-              Выйти
+              {t("Log out")}
             </button>
           </div>
         </header>
@@ -263,7 +276,7 @@ export default function App() {
                 }}
               >
                 <Icon />
-                <span className="tab-label">{item.label}</span>
+                <span className="tab-label">{t(item.label)}</span>
                 {item.short ? <span className="tab-label-short">{item.short}</span> : null}
               </button>
             )
@@ -296,7 +309,7 @@ export default function App() {
             me.role === "master" ? (
               <Lab />
             ) : (
-              <Empty title="Нет доступа" hint="Лаборатория моделей доступна только мастеру" />
+              <Empty title={t("No access")} hint={t("The model lab is only available to the master")} />
             )
           ) : null}
           {tab === "guide" ? <Guide /> : null}

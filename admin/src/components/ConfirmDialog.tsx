@@ -1,5 +1,7 @@
 import { useEffect, type ReactNode } from "react"
 
+import { useT } from "../i18n"
+
 type Props = {
   title: string
   children: ReactNode
@@ -14,11 +16,13 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel,
-  cancelLabel = "Отмена",
+  cancelLabel,
   busy,
   onConfirm,
   onCancel,
 }: Props) {
+  const t = useT()
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape" && !busy) onCancel()
@@ -37,15 +41,15 @@ export function ConfirmDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <h3 id="dialog-title" className="card-title">
-          {title}
+          {t(title)}
         </h3>
         <div className="card-sub">{children}</div>
         <div className="row">
           <button className="btn btn-primary btn-sm" disabled={busy} onClick={onConfirm}>
-            {busy ? "Сохраняю…" : confirmLabel}
+            {busy ? t("Saving…") : t(confirmLabel)}
           </button>
           <button className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancel}>
-            {cancelLabel}
+            {t(cancelLabel ?? "Cancel")}
           </button>
         </div>
       </div>

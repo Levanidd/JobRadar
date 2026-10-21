@@ -4,6 +4,7 @@ import { api, ApiError, UnauthorizedError } from "../api"
 import { useApp } from "../app-context"
 import { Field } from "../components/common"
 import { PlusIcon, TrashIcon } from "../components/icons"
+import { useT } from "../i18n"
 import { randomSeed, runSize, STRATUM_LABEL, usd, type CloneSource } from "../lab-format"
 import type {
   LabCandidateInput,
@@ -82,6 +83,7 @@ export function LabForm({
   onCancel: () => void
   onCreated: (run: LabRun) => void
 }) {
+  const t = useT()
   const { me, notify, logout } = useApp()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [users, setUsers] = useState<ManagedUser[]>([])
@@ -215,7 +217,7 @@ export function LabForm({
             seed: clamp(seed, 0, 2_147_483_647, 0),
             candidates,
           })
-      notify(result.warnings.length ? `Прогон запущен. ${result.warnings.join(". ")}` : "Прогон запущен")
+      notify(result.warnings.length ? t("Run started. {warnings}", { warnings: result.warnings.join(". ") }) : t("Run started"))
       onCreated(result.run)
     } catch (error) {
       if (error instanceof UnauthorizedError) return logout()
@@ -227,7 +229,7 @@ export function LabForm({
           if (row) byRow[row.key] = item.error
         }
         setRowErrors(byRow)
-        setLaunchError("Не все модели прошли проверку — исправьте строки, отмеченные красным")
+        setLaunchError(t("Not every model passed the check — fix the rows marked in red"))
       } else {
         setLaunchError(messageOf(error))
       }
@@ -244,39 +246,44 @@ export function LabForm({
       <section className="card">
         <div className="lab-form-head">
           <button className="btn btn-ghost btn-sm" onClick={onCancel}>
-            ← Все прогоны
+            {t("← All runs")}
           </button>
-          <h2 className="lab-title">{source ? `Клон прогона «${source.name}»` : "Новый прогон"}</h2>
+          <h2 className="lab-title">{source ? t("Clone of run “{name}”", { name: source.name }) : t("New run")}</h2>
         </div>
         {source ? (
           <p className="card-sub">
-            Те же {source.jobs} вакансий, тот же снапшот профиля и промпта
-            {source.user_name ? ` (профиль: ${source.user_name})` : ""}. Меняются только модели и число повторов.
+            {t(
+              "The same {jobs} postings, the same profile and prompt snapshot{profile}. Only the models and the number of repeats change.",
+              {
+                jobs: source.jobs,
+                profile: source.user_name ? t(" (profile: {name})", { name: source.user_name }) : "",
+              },
+            )}
           </p>
         ) : (
           <p className="card-sub">
-            Выборка берётся из вакансий с оценкой в базе. Одинаковый seed на том же пуле даёт те же вакансии.
+            {t("The sample comes from postings that already have a score. The same seed on the same pool returns the same postings.")}
           </p>
         )}
 
         <div className="lab-form-grid">
-          <Field label="Название">
+          <Field label={t("Name")}>
             <input
               className="input"
               value={name}
               maxLength={80}
-              placeholder="Прогон #N · дата"
+              placeholder={t("Run #N · date")}
               onChange={(event) => setName(event.target.value)}
             />
           </Field>
 
           {source ? null : (
-            <Field label="Чей профиль и чьи оценки">
+            <Field label={t("Whose profile and scores")}>
               <select className="select" value={userId} onChange={(event) => setUserId(Number(event.target.value))}>
                 {users.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.name}
-                    {user.role === "master" ? " · мастер" : ""}
+                    {user.role === "master" ? t(" · master") : ""}
                   </option>
                 ))}
               </select>
@@ -284,7 +291,7 @@ export function LabForm({
           )}
 
           {source ? null : (
-            <Field label="Вакансий в выборке (1–30)">
+            <Field label={t("Postings in the sample (1–30)")}>
               <input
                 className="input"
                 type="number"
@@ -296,7 +303,7 @@ export function LabForm({
             </Field>
           )}
 
-          <Field label="Повторов на вакансию (1–5)">
+          <Field label={t("Repeats per posting (1–5)")}>
             <input
               className="input"
               type="number"
@@ -308,7 +315,7 @@ export function LabForm({
           </Field>
 
           {source ? null : (
-            <Field label="Seed">
+            <Field label={t("Seed")}>
               <div className="row-tight">
                 <input
                   className="input"
@@ -317,7 +324,7 @@ export function LabForm({
                   onChange={(event) => setSeed(event.target.value.replace(/\D/g, ""))}
                 />
                 <button className="btn btn-sm" type="button" onClick={() => setSeed(String(randomSeed()))}>
-                  Случайный
+                  {t("Random")}
                 </button>
               </div>
             </Field>
@@ -327,12 +334,12 @@ export function LabForm({
         {source ? null : (
           <>
             <div className="field">
-              <span className="field-label">Режим выборки</span>
+              <span className="field-label">{t("Sample mode")}</span>
               <div className="subtabs" role="tablist">
                 {(
                   [
-                    ["stratified", "Поровну из 0–39, 40–69, 70–100"],
-                    ["random", "Случайно из всего пула"],
+                    ["stratified", t("Evenly from 0–39, 40–69, and 70–100")],
+                    ["random", t("At random from the whole pool")],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -355,7 +362,7 @@ export function LabForm({
                 checked={labeled}
                 onChange={(event) => setLabeled(event.target.checked)}
               />
-              Включить размеченные — до 30% выборки из «подался», «интервью», «сохранено», «отказ»
+              {t("Include labeled postings — up to 30% of the sample from applied, interview, saved, and rejected")}
             </label>
           </>
         )}
@@ -363,14 +370,13 @@ export function LabForm({
 
       <section className="card">
         <div className="card-title-row">
-          <h3 className="card-title">Модели</h3>
-          <span className="muted">
-            {rows.length} из {MAX_CANDIDATES}
-          </span>
+          <h3 className="card-title">{t("Models")}</h3>
+          <span className="muted">{t("{count} of {max}", { count: rows.length, max: MAX_CANDIDATES })}</span>
         </div>
         <p className="card-sub">
-          Каждая вакансия уходит в модель отдельным запросом с продакшен-промптом. Цена Nebius подтягивается из каталога;
-          для Gemini её можно ввести вручную, иначе стоимость будет «—».
+          {t(
+            "Each posting is sent to the model as its own request with the production prompt. The Nebius price comes from the catalog; for Gemini you can type it in, otherwise the cost is “—”.",
+          )}
         </p>
 
         <div className="lab-candidates">
@@ -383,24 +389,24 @@ export function LabForm({
                 <span className="lab-candidate-n">{index + 1}</span>
                 <select
                   className="select lab-candidate-provider"
-                  aria-label="Провайдер"
+                  aria-label={t("Provider")}
                   value={row.provider}
                   onChange={(event) => pickProvider(row, event.target.value as ScoringProvider)}
                 >
                   {providerOptions.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.key_configured ? item.label : `${item.label} — нет ключа`}
+                      {item.key_configured ? item.label : t("{label} — no key", { label: item.label })}
                     </option>
                   ))}
                 </select>
                 <select
                   className="select lab-candidate-model"
-                  aria-label="Модель"
+                  aria-label={t("Model")}
                   value={row.model}
                   disabled={provider?.key_configured === false || catalog.length === 0}
                   onChange={(event) => updateRow(row.key, { model: event.target.value })}
                 >
-                  {row.model ? null : <option value="">Выберите модель</option>}
+                  {row.model ? null : <option value="">{t("Choose a model")}</option>}
                   {row.model && !catalog.some((item) => item.id === row.model) ? (
                     <option value={row.model}>{row.model}</option>
                   ) : null}
@@ -414,7 +420,7 @@ export function LabForm({
                   <>
                     <select
                       className="select lab-candidate-thinking"
-                      aria-label="Глубина размышлений"
+                      aria-label={t("Thinking depth")}
                       value={row.thinking}
                       onChange={(event) => updateRow(row.key, { thinking: event.target.value as ThinkingLevel })}
                     >
@@ -428,16 +434,16 @@ export function LabForm({
                       <input
                         className="input"
                         inputMode="decimal"
-                        aria-label="Цена входа, $ за 1M токенов"
-                        placeholder="$ вход/1M"
+                        aria-label={t("Input price, $ per 1M tokens")}
+                        placeholder={t("$ input/1M")}
                         value={row.priceIn}
                         onChange={(event) => updateRow(row.key, { priceIn: event.target.value })}
                       />
                       <input
                         className="input"
                         inputMode="decimal"
-                        aria-label="Цена ответа, $ за 1M токенов"
-                        placeholder="$ ответ/1M"
+                        aria-label={t("Output price, $ per 1M tokens")}
+                        placeholder={t("$ output/1M")}
                         value={row.priceOut}
                         onChange={(event) => updateRow(row.key, { priceOut: event.target.value })}
                       />
@@ -446,18 +452,21 @@ export function LabForm({
                 ) : (
                   <span className="lab-candidate-listed muted">
                     {listed?.price_in_per_m !== undefined && listed.price_out_per_m !== undefined
-                      ? `$${listed.price_in_per_m.toFixed(2)} / $${listed.price_out_per_m.toFixed(2)} за 1M`
+                      ? t("${input} / ${output} per 1M", {
+                          input: listed.price_in_per_m.toFixed(2),
+                          output: listed.price_out_per_m.toFixed(2),
+                        })
                       : row.priceIn && row.priceOut
-                        ? `$${row.priceIn} / $${row.priceOut} за 1M`
+                        ? t("${input} / ${output} per 1M", { input: row.priceIn, output: row.priceOut })
                         : row.model
-                          ? "цены в каталоге нет"
+                          ? t("no catalog price")
                           : ""}
                   </span>
                 )}
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label={`Убрать модель ${index + 1}`}
+                  aria-label={t("Remove model {n}", { n: index + 1 })}
                   disabled={rows.length === 1}
                   onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
                 >
@@ -472,24 +481,24 @@ export function LabForm({
         <div className="row">
           <button className="btn btn-sm" type="button" disabled={rows.length >= MAX_CANDIDATES} onClick={addRow}>
             <PlusIcon className="btn-icon" />
-            Модель
+            {t("Model")}
           </button>
         </div>
       </section>
 
       <section className={`card lab-preview ${previewing ? "is-loading" : ""}`}>
-        <h3 className="card-title">Превью</h3>
+        <h3 className="card-title">{t("Preview")}</h3>
         {!complete ? (
-          <p className="muted">Укажите модель в каждой строке — превью посчитается само.</p>
+          <p className="muted">{t("Pick a model on every row — the preview calculates itself.")}</p>
         ) : previewError ? (
           <p className="error-text">{previewError}</p>
         ) : !preview ? (
-          <p className="muted">Считаю…</p>
+          <p className="muted">{t("Calculating…")}</p>
         ) : (
           <>
             <div className="lab-kpis">
               <div className="lab-kpi">
-                <span className="stat-label">{source ? "Вакансий в исходном прогоне" : "Пул для выборки"}</span>
+                <span className="stat-label">{source ? t("Postings in the source run") : t("Pool for the sample")}</span>
                 <span className="lab-kpi-value">{preview.pool_size}</span>
                 <div className="lab-strata">
                   {STRATA.map((stratum) => (
@@ -500,16 +509,16 @@ export function LabForm({
                 </div>
               </div>
               <div className="lab-kpi">
-                <span className="stat-label">Попыток</span>
+                <span className="stat-label">{t("Attempts")}</span>
                 <span className="lab-kpi-value">{preview.trials}</span>
-                <span className="stat-hint">
-                  {runSize(preview.sample_size, candidates.length, repeatsN)}
-                </span>
+                <span className="stat-hint">{runSize(preview.sample_size, candidates.length, repeatsN)}</span>
               </div>
               <div className="lab-kpi">
-                <span className="stat-label">Оценка стоимости</span>
+                <span className="stat-label">{t("Estimated cost")}</span>
                 <span className="lab-kpi-value">{usd(preview.est_cost_usd)}</span>
-                <span className="stat-hint">по прошлым запросам этих моделей, иначе по длине промпта</span>
+                <span className="stat-hint">
+                  {t("from past requests to these models, otherwise from the prompt length")}
+                </span>
               </div>
             </div>
             {preview.warnings.length ? (
@@ -527,14 +536,14 @@ export function LabForm({
 
         <div className="row">
           <button className="btn btn-primary" disabled={blocked || launching} onClick={() => void launch()}>
-            {launching ? "Проверяю модели…" : "Запустить"}
+            {launching ? t("Checking models…") : t("Start run")}
           </button>
           <button className="btn btn-ghost" disabled={launching} onClick={onCancel}>
-            Отмена
+            {t("Cancel")}
           </button>
         </div>
         <p className="stat-hint">
-          Перед запуском каждая модель проверяется коротким запросом — он виден в журнале как «Проверка модели».
+          {t("Before the start, each model is checked with a short request — it shows up in the log as “Model check”.")}
         </p>
       </section>
     </>

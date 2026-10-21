@@ -2,9 +2,11 @@ import { useCallback, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useLoader } from "../app-context"
+import { useT } from "../i18n"
 
-/** Master-only editor for the prompt behind "Скачать промпт для профиля". */
+/** Master-only editor for the prompt behind "Download the profile prompt". */
 export function ProfilePromptEditor() {
+  const t = useT()
   const run = useAction()
   const [prompt, setPrompt] = useState<string | null>(null)
   const [saved, setSaved] = useState("")
@@ -22,7 +24,7 @@ export function ProfilePromptEditor() {
   async function save() {
     if (prompt === null) return
     setBusy(true)
-    const result = await run(() => api.saveProfilePrompt(prompt), "Промпт сохранён")
+    const result = await run(() => api.saveProfilePrompt(prompt), t("Prompt saved"))
     setBusy(false)
     if (!result) return
     setPrompt(result.prompt)
@@ -33,9 +35,9 @@ export function ProfilePromptEditor() {
 
   return (
     <section className="card">
-      <h3 className="card-title">Промпт для профиля</h3>
+      <h3 className="card-title">{t("Profile prompt")}</h3>
       <p className="card-sub">
-        Его копирует кнопка «Скачать промпт для профиля» в профиле. Один текст для всех пользователей.
+        {t("The \"Download the profile prompt\" button on the profile copies this. One text for every user.")}
       </p>
       <textarea className="textarea" value={prompt} onChange={(event) => setPrompt(event.target.value)} />
       <div className="row">
@@ -44,10 +46,10 @@ export function ProfilePromptEditor() {
           disabled={busy || !prompt.trim() || prompt === saved}
           onClick={() => void save()}
         >
-          Сохранить
+          {t("Save")}
         </button>
         <button className="btn btn-ghost btn-sm" disabled={busy || prompt === saved} onClick={() => setPrompt(saved)}>
-          Отменить
+          {t("Revert")}
         </button>
       </div>
     </section>

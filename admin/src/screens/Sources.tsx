@@ -2,9 +2,10 @@ import { useCallback, useMemo, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useApp, useLoader } from "../app-context"
-import { oneOf, text, usePersistentState } from "../persist"
-import { SortHeader } from "../components/SortHeader"
 import { Age, Count, Empty, Skeletons } from "../components/common"
+import { SortHeader } from "../components/SortHeader"
+import { getLang, useT } from "../i18n"
+import { oneOf, text, usePersistentState } from "../persist"
 import type { Source, Tier } from "../types"
 
 const ATS_SUBDOMAINS = new Set(["jobs", "boards", "job-boards", "apply", "careers"])
@@ -83,6 +84,17 @@ const DEFAULT_DIR: Record<SourceSort, "asc" | "desc"> = {
   added: "desc",
 }
 
+/** English has one plural. Russian keeps the three forms the counter already asks for. */
+function countForms(
+  t: (english: string) => string,
+  one: string,
+  few: string,
+  many: string,
+): [string, string, string] {
+  if (getLang() !== "ru") return [one, many, many]
+  return [t(one), t(few), t(many)]
+}
+
 function runStatus(source: Source): "ok" | "error" | "never" {
   if (source.last_ok == null) return "never"
   return Number(source.last_ok) ? "ok" : "error"
@@ -132,6 +144,7 @@ function compare(a: Source, b: Source, sort: SourceSort, dir: "asc" | "desc"): n
 }
 
 export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }) {
+  const t = useT()
   const run = useAction()
   const { me, notify, sourcesTick, runningSourceId } = useApp()
   const master = me?.role === "master"
@@ -216,8 +229,11 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
       setBulk(failed.join("\n"))
       notify(
         failed.length === 0
-          ? `Добавлено ${added}`
-          : `Добавлено ${added} из ${parsed.urls.length}. Неопределённые ссылки остались в поле`,
+          ? t("Added {added}", { added })
+          : t("Added {added} of {total}. Unrecognized links stayed in the field", {
+              added,
+              total: parsed.urls.length,
+            }),
         failed.length === 0 ? "ok" : "error",
       )
       setSort("added")
@@ -256,16 +272,20 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
     if (!result) return
     notify(
       result.run.ok
-        ? `${source.label}: найдено ${result.run.jobs_found}, новых ${result.run.jobs_new}`
-        : `${source.label}: ${result.run.error ?? "ошибка"}`,
+        ? t("{label}: found {found}, {fresh} new", {
+            label: source.label,
+            found: result.run.jobs_found,
+            fresh: result.run.jobs_new,
+          })
+        : t("{label}: {error}", { label: source.label, error: result.run.error ?? t("error") }),
       result.run.ok ? "ok" : "error",
     )
     await load(true)
   }
 
   async function remove(source: Source) {
-    if (!confirm(`Удалить «${source.label}»? История откликов сохранится.`)) return
-    const result = await run(() => api.deleteSource(source.id), `${source.label} удалена`)
+    if (!confirm(t("Delete \"{label}\"? Application history is kept.", { label: source.label }))) return
+    const result = await run(() => api.deleteSource(source.id), t("{label} deleted", { label: source.label }))
     if (!result) return
     setSources((prev) => prev?.filter((item) => item.id !== source.id) ?? null)
   }
@@ -281,11 +301,11 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
   return (
     <>
       <section className="card">
-        <h3 className="card-title">Добавить компанию</h3>
+        <h3 className="card-title">{t("Add a company")}</h3>
         <p className="card-sub">
-          Ссылка на карьерную страницу — одна или сразу несколько, по одной на строку. Для каждой определим ATS
-          и проверим, что вакансии читаются. Если ATS не нашёлся, ссылка останется в поле. Название и уровень
-          потом можно поправить в таблице.
+          {t(
+            "A careers-page link, one or several, one per line. For each we detect the ATS and check that jobs can be read. If the ATS is not found, the link stays in the field. You can edit the label and tier in the table afterwards.",
+          )}
         </p>
         <textarea
           className="textarea"
@@ -297,13 +317,13 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
         />
         {bulkProgress ? (
           <p className="muted">
-            {bulkProgress.done + 1} из {bulkProgress.total}
+            {t("{done} of {total}", { done: bulkProgress.done + 1, total: bulkProgress.total })}
             {bulkProgress.current ? ` · ${bulkProgress.current}` : ""}
           </p>
         ) : null}
         <div className="row">
           <button className="btn btn-primary btn-sm" disabled={bulkBusy || !bulk.trim()} onClick={() => void runBulk()}>
-            {bulkBusy ? "Проверяю…" : "Добавить"}
+            {bulkBusy ? t("Checking…") : t("Add")}
           </button>
         </div>
       </section>
@@ -311,33 +331,33 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
       <div className="filters">
         <input
           className="input"
-          placeholder="Поиск"
+          placeholder={t("Search")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
         <select className="select" value={kind} onChange={(event) => setKind(event.target.value as KindFilter)}>
-          <option value="">Все</option>
-          <option value="company">Компания</option>
-          <option value="query">Запрос</option>
+          <option value="">{t("All")}</option>
+          <option value="company">{t("Company")}</option>
+          <option value="query">{t("Query")}</option>
         </select>
         <select className="select" value={tier} onChange={(event) => setTier(event.target.value as TierFilter)}>
-          <option value="">Все</option>
+          <option value="">{t("All")}</option>
           <option value="watchlist">Watchlist</option>
           <option value="discovery">Discovery</option>
         </select>
         <select className="select" value={enabled} onChange={(event) => setEnabled(event.target.value as EnabledFilter)}>
-          <option value="">Все</option>
-          <option value="on">Включённые</option>
-          <option value="off">Выключенные</option>
+          <option value="">{t("All")}</option>
+          <option value="on">{t("Enabled")}</option>
+          <option value="off">{t("Disabled")}</option>
         </select>
         <select className="select" value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}>
-          <option value="">Все</option>
-          <option value="ok">Ок</option>
-          <option value="error">Ошибка</option>
-          <option value="never">Не запускался</option>
+          <option value="">{t("All")}</option>
+          <option value="ok">{t("OK")}</option>
+          <option value="error">{t("Error")}</option>
+          <option value="never">{t("Never run")}</option>
         </select>
         <select className="select" value={provider} onChange={(event) => setProvider(event.target.value)}>
-          <option value="">Все</option>
+          <option value="">{t("All")}</option>
           {providers.map((item) => (
             <option key={item} value={item}>
               {item}
@@ -349,25 +369,25 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
       {sources === null ? (
         <Skeletons />
       ) : sources.length === 0 ? (
-        <Empty title="Источников нет" hint="Похоже, миграции ещё не накатились." />
+        <Empty title={t("No sources")} hint={t("Migrations do not seem to have been applied yet.")} />
       ) : rows.length === 0 ? (
-        <Empty title="Ничего не нашлось" hint="Сбросьте фильтры." />
+        <Empty title={t("Nothing found")} hint={t("Clear the filters.")} />
       ) : (
         <>
-          <Count shown={rows.length} total={sources.length} forms={["источник", "источника", "источников"]} />
+          <Count shown={rows.length} total={sources.length} forms={countForms(t, "source", "a few sources", "sources")} />
           <div className="table-wrap">
             <table className="table table-compact">
               <thead>
                 <tr>
-                  <SortHeader column="label" label="Название" sort={sort} dir={dir} onSort={sortBy} />
-                  <SortHeader column="tier" label="Уровень" sort={sort} dir={dir} onSort={sortBy} />
-                  <SortHeader column="jobs" label="Вакансий" sort={sort} dir={dir} onSort={sortBy} className="col-score" />
-                  <SortHeader column="run" label="Прогон" sort={sort} dir={dir} onSort={sortBy} className="col-date" />
-                  <SortHeader column="status" label="Статус" sort={sort} dir={dir} onSort={sortBy} />
+                  <SortHeader column="label" label={t("Label")} sort={sort} dir={dir} onSort={sortBy} />
+                  <SortHeader column="tier" label={t("Tier")} sort={sort} dir={dir} onSort={sortBy} />
+                  <SortHeader column="jobs" label={t("Jobs")} sort={sort} dir={dir} onSort={sortBy} className="col-score" />
+                  <SortHeader column="run" label={t("Last run")} sort={sort} dir={dir} onSort={sortBy} className="col-date" />
+                  <SortHeader column="status" label={t("Status")} sort={sort} dir={dir} onSort={sortBy} />
                   <th className="col-actions" />
                   <SortHeader column="provider" label="ATS" sort={sort} dir={dir} onSort={sortBy} />
-                  <SortHeader column="kind" label="Тип" sort={sort} dir={dir} onSort={sortBy} />
-                  <th>Ссылка</th>
+                  <SortHeader column="kind" label={t("Type")} sort={sort} dir={dir} onSort={sortBy} />
+                  <th>{t("Link")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -425,7 +445,7 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
                         <button
                           type="button"
                           className="cell-link cell-count"
-                          title={`Вакансии источника «${source.label}»`}
+                          title={t("Jobs from \"{label}\"", { label: source.label })}
                           onClick={() => onOpenJobs(source)}
                         >
                           {source.active_jobs}
@@ -439,32 +459,32 @@ export function Sources({ onOpenJobs }: { onOpenJobs: (source: Source) => void }
                     </td>
                     <td>
                       {runStatus(source) === "never" ? (
-                        <span className="badge badge-neutral">не запускался</span>
+                        <span className="badge badge-neutral">{t("never run")}</span>
                       ) : runStatus(source) === "ok" ? (
-                        <span className="badge badge-positive">ок</span>
+                        <span className="badge badge-positive">{t("ok")}</span>
                       ) : (
-                        <span className="badge badge-negative">ошибка</span>
+                        <span className="badge badge-negative">{t("error")}</span>
                       )}
                     </td>
                     <td className="col-actions">
                       <div className="row-tight row-btns">
                         <button className="btn btn-sm" onClick={() => void runOne(source)}>
-                          Прогнать
+                          {t("Run")}
                         </button>
                         {master ? (
                           <>
                             <button className="btn btn-sm" onClick={() => void toggle(source)}>
-                              {source.enabled ? "Выкл" : "Вкл"}
+                              {source.enabled ? t("Off") : t("On")}
                             </button>
                             <button className="btn btn-danger btn-sm" onClick={() => void remove(source)}>
-                              Удалить
+                              {t("Delete")}
                             </button>
                           </>
                         ) : null}
                       </div>
                     </td>
                     <td>{source.provider}</td>
-                    <td>{source.kind === "query" ? "запрос" : "компания"}</td>
+                    <td>{source.kind === "query" ? t("query") : t("company")}</td>
                     <td className="col-url">
                       {source.careers_url ? (
                         <a className="mono" href={source.careers_url} target="_blank" rel="noreferrer" title={source.careers_url}>

@@ -3,18 +3,19 @@ import { useCallback, useEffect, useState } from "react"
 import { api } from "../api"
 import { useAction, useApp, useLoader } from "../app-context"
 import { Field } from "../components/common"
+import { useT } from "../i18n"
 import type { ModelOption, ModelSource, ScoringProvider, Settings, ThinkingLevel } from "../types"
 
 const THINKING: Array<{ id: ThinkingLevel; label: string }> = [
-  { id: "LOW", label: "Низкий — дешевле и быстрее" },
-  { id: "MEDIUM", label: "Средний" },
-  { id: "HIGH", label: "Высокий — дороже, ответы обстоятельнее" },
+  { id: "LOW", label: "Low — cheaper and faster" },
+  { id: "MEDIUM", label: "Medium" },
+  { id: "HIGH", label: "High — more expensive, more thorough answers" },
 ]
 
 const SOURCE_LABELS: Record<ModelSource, string> = {
-  database: "выбрана здесь",
-  secret: "из секрета GEMINI_MODEL",
-  default: "значение по умолчанию",
+  database: "chosen here",
+  secret: "from the GEMINI_MODEL secret",
+  default: "the default value",
 }
 
 const KEY_PAGES: Record<ScoringProvider, string> = {
@@ -23,6 +24,7 @@ const KEY_PAGES: Record<ScoringProvider, string> = {
 }
 
 export function ModelPicker() {
+  const t = useT()
   const run = useAction()
   const { notify } = useApp()
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -74,7 +76,7 @@ export function ModelPicker() {
     setBusy(true)
     const result = await run(
       () => api.saveSettings({ provider, model, ...(provider === "gemini" ? { thinking_level: thinking } : {}) }),
-      "Модель сохранена",
+      t("Model saved"),
     )
     setBusy(false)
     if (result) setSettings(result)
@@ -83,9 +85,18 @@ export function ModelPicker() {
   if (!settings || !selected) return null
 
   const active = settings.providers.find((item) => item.id === settings.provider)
-  const savedSuffix = selected.source === "default" ? "по умолчанию" : "выбрана ранее"
   const options = [
-    ...(models.some((item) => item.id === model) ? [] : [{ id: model, text: `${model} (${savedSuffix})` }]),
+    ...(models.some((item) => item.id === model)
+      ? []
+      : [
+          {
+            id: model,
+            text:
+              selected.source === "default"
+                ? t("{model} (default)", { model })
+                : t("{model} (saved earlier)", { model }),
+          },
+        ]),
     ...models.map((item) => ({
       id: item.id,
       text: item.label && item.label !== item.id ? `${item.label} — ${item.id}` : item.id,
@@ -98,19 +109,22 @@ export function ModelPicker() {
 
   return (
     <section className="card">
-      <h3 className="card-title">Модель для оценки</h3>
+      <h3 className="card-title">{t("Scoring model")}</h3>
       <p className="card-sub">
-        Сейчас оценивает <b>{settings.model}</b> через {active?.label ?? settings.provider} —{" "}
-        {SOURCE_LABELS[settings.source]}.
+        {t("Currently scoring with")} <b>{settings.model}</b>{" "}
+        {t("via {provider} — {source}.", {
+          provider: active?.label ?? settings.provider,
+          source: t(SOURCE_LABELS[settings.source]),
+        })}
       </p>
 
       {!settings.key_configured ? (
         <p className="error-text">
-          Ключ {active?.key_name} не задан, оценки считает локальная эвристика по ключевым словам.
+          {t("The {key} key is not set, so a local keyword heuristic is scoring.", { key: active?.key_name ?? "" })}
         </p>
       ) : null}
 
-      <Field label="Ресурс">
+      <Field label={t("Resource")}>
         <select
           className="select"
           value={provider}
@@ -118,7 +132,7 @@ export function ModelPicker() {
         >
           {settings.providers.map((item) => (
             <option key={item.id} value={item.id}>
-              {item.key_configured ? item.label : `${item.label} — ключ не задан`}
+              {item.key_configured ? item.label : t("{label} — key not set", { label: item.label })}
             </option>
           ))}
         </select>
@@ -126,16 +140,18 @@ export function ModelPicker() {
 
       {!keyConfigured ? (
         <p className="muted">
-          Чтобы включить {selected.label}, создайте ключ на{" "}
+          {t("To turn on {label}, create a key on", { label: selected.label })}{" "}
           <a href={KEY_PAGES[provider]} target="_blank" rel="noreferrer">
-            странице API-ключей
+            {t("the API keys page")}
           </a>{" "}
-          и вставьте его в Cloudflare: Workers &amp; Pages → jobradar → Settings → Variables and Secrets →{" "}
-          <b>{selected.key_name}</b> → Edit. Затем обновите эту страницу.
+          {t(
+            "and paste it into Cloudflare: Workers & Pages → jobradar → Settings → Variables and Secrets → {key} → Edit. Then refresh this page.",
+            { key: selected.key_name },
+          )}
         </p>
       ) : null}
 
-      <Field label="Модель">
+      <Field label={t("Model")}>
         <select
           className="select"
           value={model}
@@ -152,7 +168,7 @@ export function ModelPicker() {
 
       {provider === "gemini" ? (
         <>
-          <Field label="Глубина размышлений">
+          <Field label={t("Thinking depth")}>
             <select
               className="select"
               value={thinking}
@@ -160,21 +176,23 @@ export function ModelPicker() {
             >
               {THINKING.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.label}
+                  {t(item.label)}
                 </option>
               ))}
             </select>
           </Field>
 
           <p className="muted">
-            Размышления оплачиваются как ответ, поэтому именно они определяют счёт. Если модель не поддержит
-            выбранный уровень, запрос повторится с её собственным значением.
+            {t(
+              "Thinking is billed as output, so that is what drives the bill. If the model does not support the chosen level, the request is retried with the model's own value.",
+            )}
           </p>
         </>
       ) : (
         <p className="muted">
-          Цена указана за миллион токенов: вход / ответ. Модели с размышлениями (DeepSeek-R1, Qwen3 Thinking, gpt-oss)
-          думают сами и тратят больше токенов ответа. При сохранении модель проверяется коротким запросом.
+          {t(
+            "The price is per million tokens: input / output. Models that think (DeepSeek-R1, Qwen3 Thinking, gpt-oss) think on their own and spend more output tokens. On save, the model is checked with a short request.",
+          )}
         </p>
       )}
 
@@ -184,7 +202,7 @@ export function ModelPicker() {
           disabled={busy || !dirty || !keyConfigured || !model}
           onClick={() => void save()}
         >
-          {busy ? "Проверяю…" : "Сохранить"}
+          {busy ? t("Checking…") : t("Save")}
         </button>
       </div>
     </section>

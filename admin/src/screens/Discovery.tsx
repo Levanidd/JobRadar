@@ -2,9 +2,10 @@ import { useCallback, useMemo, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useApp, useLoader } from "../app-context"
-import { oneOf, text, usePersistentState } from "../persist"
-import { SortHeader } from "../components/SortHeader"
 import { Age, Count, Empty, ScoreBadge, Skeletons } from "../components/common"
+import { SortHeader } from "../components/SortHeader"
+import { getLang, useT } from "../i18n"
+import { oneOf, text, usePersistentState } from "../persist"
 import type { DiscoveredCompany } from "../types"
 
 type StateFilter = "" | "new" | "added" | "dismissed"
@@ -14,9 +15,9 @@ type AtsFilter = string
 type SortKey = "company" | "jobs" | "score" | "seen" | "ats"
 
 const STATE_LABELS: Record<DiscoveredCompany["state"], string> = {
-  new: "Новая",
-  added: "В мониторинге",
-  dismissed: "Скрытая",
+  new: "New",
+  added: "Monitoring",
+  dismissed: "Hidden",
 }
 
 const STATE_BADGE: Record<DiscoveredCompany["state"], string> = {
@@ -31,6 +32,17 @@ const DEFAULT_DIR: Record<SortKey, "asc" | "desc"> = {
   score: "desc",
   seen: "desc",
   ats: "asc",
+}
+
+/** English has one plural. Russian keeps the three forms the counter already asks for. */
+function countForms(
+  t: (english: string) => string,
+  one: string,
+  few: string,
+  many: string,
+): [string, string, string] {
+  if (getLang() !== "ru") return [one, many, many]
+  return [t(one), t(few), t(many)]
 }
 
 function compare(a: DiscoveredCompany, b: DiscoveredCompany, sort: SortKey, dir: "asc" | "desc"): number {
@@ -59,6 +71,7 @@ function compare(a: DiscoveredCompany, b: DiscoveredCompany, sort: SortKey, dir:
 }
 
 export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredCompany) => void }) {
+  const t = useT()
   const run = useAction()
   const { notify } = useApp()
   const [companies, setCompanies] = useState<DiscoveredCompany[] | null>(null)
@@ -126,8 +139,8 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
     if (!result) return
     notify(
       result.added
-        ? `${company.company} — отслеживаем через ${result.ats}`
-        : `${company.company}: ATS не определился, компания остаётся в query-источниках`,
+        ? t("{company} — tracking via {ats}", { company: company.company, ats: result.ats ?? "" })
+        : t("{company}: ATS was not detected, the company stays on query sources", { company: company.company }),
       result.added ? "ok" : "error",
     )
     setCompanies(
@@ -154,28 +167,28 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
   return (
     <>
       <p className="muted">
-        Компании из поисковых досок, которых ещё нет в источниках. Карточка есть, даже если все позиции «вне профиля» —
-        в обычном списке вакансий их не видно. «Вакансии» открывает полный набор, «Отслеживать» подключает доску
-        компании.
+        {t(
+          "Companies from search boards that are not in sources yet. A card is here even when every role is off profile — those jobs stay out of the normal list. \"Jobs\" opens the full set, and \"Track\" connects the company board.",
+        )}
       </p>
 
       <div className="filters">
         <input
           className="input"
-          placeholder="Поиск компании"
+          placeholder={t("Search companies")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
         <select className="select" value={state} onChange={(event) => setState(event.target.value as StateFilter)}>
-          <option value="">Все</option>
-          <option value="new">Новые</option>
-          <option value="added">В мониторинге</option>
-          <option value="dismissed">Скрытые</option>
+          <option value="">{t("All")}</option>
+          <option value="new">{t("New")}</option>
+          <option value="added">{t("Monitoring")}</option>
+          <option value="dismissed">{t("Hidden")}</option>
         </select>
         <select className="select" value={ats} onChange={(event) => setAts(event.target.value)}>
-          <option value="">Все</option>
-          <option value="known">ATS известен</option>
-          <option value="none">ATS не найден</option>
+          <option value="">{t("All")}</option>
+          <option value="known">{t("ATS known")}</option>
+          <option value="none">{t("ATS not found")}</option>
           {providers.map((item) => (
             <option key={item} value={item}>
               {item}
@@ -183,9 +196,9 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
           ))}
         </select>
         <select className="select" value={jobs} onChange={(event) => setJobs(event.target.value as JobsFilter)}>
-          <option value="">Все</option>
-          <option value="open">Есть открытые</option>
-          <option value="none">Без открытых</option>
+          <option value="">{t("All")}</option>
+          <option value="open">{t("Has open jobs")}</option>
+          <option value="none">{t("No open jobs")}</option>
         </select>
       </div>
 
@@ -193,24 +206,30 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
         <Skeletons />
       ) : companies.length === 0 ? (
         <Empty
-          title="Пока пусто"
-          hint="Компании появятся здесь после прогона query-источников — они собираются из вакансий, которых нет в watchlist."
+          title={t("Nothing here yet")}
+          hint={t(
+            "Companies show up here after a query-source run — they are collected from jobs that are not on the watchlist.",
+          )}
         />
       ) : rows.length === 0 ? (
-        <Empty title="Ничего не нашлось" hint="Сбросьте фильтры или поиск." />
+        <Empty title={t("Nothing found")} hint={t("Clear the filters or the search.")} />
       ) : (
         <>
-          <Count shown={rows.length} total={companies.length} forms={["компания", "компании", "компаний"]} />
+          <Count
+            shown={rows.length}
+            total={companies.length}
+            forms={countForms(t, "company", "a few companies", "companies")}
+          />
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <SortHeader column="company" label="Компания" sort={sort} dir={dir} onSort={sortBy} />
-                  <SortHeader column="jobs" label="Вакансий" sort={sort} dir={dir} onSort={sortBy} className="col-score" />
+                  <SortHeader column="company" label={t("Company")} sort={sort} dir={dir} onSort={sortBy} />
+                  <SortHeader column="jobs" label={t("Jobs")} sort={sort} dir={dir} onSort={sortBy} className="col-score" />
                   <SortHeader column="score" label="Score" sort={sort} dir={dir} onSort={sortBy} className="col-score" />
                   <SortHeader column="ats" label="ATS" sort={sort} dir={dir} onSort={sortBy} />
-                  <th>Статус</th>
-                  <SortHeader column="seen" label="Найдена" sort={sort} dir={dir} onSort={sortBy} className="col-date" />
+                  <th>{t("Status")}</th>
+                  <SortHeader column="seen" label={t("Seen")} sort={sort} dir={dir} onSort={sortBy} className="col-date" />
                   <th className="col-actions" />
                 </tr>
               </thead>
@@ -222,7 +241,7 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
                       {company.sample_url ? (
                         <div className="cell-sub">
                           <a href={company.sample_url} target="_blank" rel="noreferrer">
-                            Вакансия →
+                            {t("Job")} →
                           </a>
                         </div>
                       ) : null}
@@ -232,7 +251,7 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
                         <button
                           type="button"
                           className="cell-link cell-count"
-                          title={`Вакансии ${company.company}`}
+                          title={t("Jobs at {company}", { company: company.company })}
                           onClick={() => onOpenJobs(company)}
                         >
                           {company.jobs_open}
@@ -252,7 +271,7 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
                       )}
                     </td>
                     <td>
-                      <span className={`badge ${STATE_BADGE[company.state]}`}>{STATE_LABELS[company.state]}</span>
+                      <span className={`badge ${STATE_BADGE[company.state]}`}>{t(STATE_LABELS[company.state])}</span>
                     </td>
                     <td className="col-date">
                       <Age value={company.first_seen_at} warnAfter={14} />
@@ -261,7 +280,7 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
                       <div className="row-tight">
                         {company.jobs_open > 0 ? (
                           <button className="btn btn-sm" onClick={() => onOpenJobs(company)}>
-                            Вакансии
+                            {t("Jobs")}
                           </button>
                         ) : null}
                         {company.state === "new" ? (
@@ -271,14 +290,14 @@ export function Discovery({ onOpenJobs }: { onOpenJobs: (company: DiscoveredComp
                               disabled={busy === company.company_key}
                               onClick={() => void track(company)}
                             >
-                              Отслеживать
+                              {t("Track")}
                             </button>
                             <button
                               className="btn btn-ghost btn-sm"
                               disabled={busy === company.company_key}
                               onClick={() => void dismiss(company)}
                             >
-                              Скрыть
+                              {t("Hide")}
                             </button>
                           </>
                         ) : null}

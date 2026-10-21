@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 
 import { resumeStuckCycle } from "./cycle"
-import { D1_LIMIT_MESSAGE, isD1LimitError, message } from "./errors"
+import { d1LimitMessage, isD1LimitError, message } from "./errors"
 import { resumeStuckLab } from "./lab"
 import { maybeAutoRun } from "./schedule"
 import { discovery } from "./routes/discovery"
@@ -15,11 +15,14 @@ import { stats } from "./routes/stats"
 import { mcp } from "./routes/mcp"
 import { users } from "./routes/users"
 import type { AppEnv } from "./types"
+import { bindLang } from "./locale"
 import { resolveAuth } from "./users"
 
 const app = new Hono<AppEnv>()
 
 app.use("/api/*", cors())
+
+app.use("/api/*", (c, next) => bindLang(c.req.header("Accept-Language"), () => next()))
 
 app.use("/api/*", async (c, next) => {
   if (c.req.path === "/api/health") return next()
@@ -56,7 +59,7 @@ app.all("*", (c) => c.json({ error: "not found" }, 404))
 
 app.onError((err, c) => {
   const detail = message(err)
-  if (isD1LimitError(detail)) return c.json({ error: D1_LIMIT_MESSAGE }, 503)
+  if (isD1LimitError(detail)) return c.json({ error: d1LimitMessage() }, 503)
   return c.json({ error: detail }, 500)
 })
 

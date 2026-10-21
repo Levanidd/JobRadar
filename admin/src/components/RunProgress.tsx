@@ -1,3 +1,5 @@
+import { useT } from "../i18n"
+
 export type RunPhase = "sources" | "scoring" | "digest"
 
 export type RunState = {
@@ -12,27 +14,28 @@ export type RunState = {
 }
 
 const TITLES: Record<RunPhase, string> = {
-  sources: "Обход источников",
-  scoring: "Оценка вакансий",
-  digest: "Отправка дайджеста",
+  sources: "Crawling sources",
+  scoring: "Scoring jobs",
+  digest: "Sending the digest",
 }
 
 const HINTS: Record<RunPhase, string> = {
-  sources: "читаю доски — страницу можно закрыть",
-  scoring: "модель читает описания — страницу можно закрыть",
-  digest: "собираю сообщение в Telegram",
+  sources: "Reading boards — you can close the page",
+  scoring: "The model is reading descriptions — you can close the page",
+  digest: "Composing the Telegram message",
 }
 
 export function RunProgress({ state }: { state: RunState }) {
+  const t = useT()
   const percent = state.total > 0 ? Math.min(100, Math.round((state.done / state.total) * 100)) : 0
 
   return (
     <article className="card">
       <div className="card-head">
         <div>
-          <h3 className="card-title">{TITLES[state.phase]}</h3>
+          <h3 className="card-title">{t(TITLES[state.phase])}</h3>
           <p className="card-sub">
-            {state.total > 0 ? `${state.done} из ${state.total}` : HINTS[state.phase]}
+            {state.total > 0 ? t("{done} of {total}", { done: state.done, total: state.total }) : t(HINTS[state.phase])}
             {state.current ? ` · ${state.current}` : ""}
           </p>
         </div>
@@ -44,9 +47,9 @@ export function RunProgress({ state }: { state: RunState }) {
       </div>
 
       <p className="muted">
-        Вакансий {state.found}, из них новых {state.fresh}
-        {state.failed > 0 ? ` · источников с ошибкой: ${state.failed}` : ""}
-        {" · прогон на сервере, вкладку можно закрыть"}
+        {t("Jobs {found}, {fresh} of them new", { found: state.found, fresh: state.fresh })}
+        {state.failed > 0 ? t(" · sources with errors: {failed}", { failed: state.failed }) : ""}
+        {t(" · the run is on the server, you can close the tab")}
       </p>
     </article>
   )

@@ -1,4 +1,5 @@
 import { message } from "./errors"
+import { pick } from "./locale"
 import type { Bindings } from "./types"
 
 const MAX_ROWS = 100
@@ -10,13 +11,13 @@ const MAX_CELL = 400
  */
 export function assertReadOnly(raw: string): string {
   const sql = raw.trim().replace(/;+\s*$/g, "")
-  if (!sql) throw new Error("Пустой запрос")
-  if (sql.includes(";")) throw new Error("Только один запрос, без точки с запятой")
+  if (!sql) throw new Error(pick("Empty query", "Пустой запрос"))
+  if (sql.includes(";")) throw new Error(pick("One query only, no semicolon", "Только один запрос, без точки с запятой"))
   const bare = sql.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim()
-  if (!/^(select|with)\b/i.test(bare)) throw new Error("Можно только SELECT")
+  if (!/^(select|with)\b/i.test(bare)) throw new Error(pick("Only SELECT is allowed", "Можно только SELECT"))
   // `WITH cte AS (SELECT 1) DELETE …` is a write. The verb sits after a CTE's closing paren.
   if (/\)\s*(insert|update|delete|replace|drop|alter|create|attach|detach|reindex|vacuum|begin|commit|rollback|savepoint|pragma)\b/i.test(bare)) {
-    throw new Error("Можно только SELECT")
+    throw new Error(pick("Only SELECT is allowed", "Можно только SELECT"))
   }
   return bare
 }

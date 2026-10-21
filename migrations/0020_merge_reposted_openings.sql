@@ -35,7 +35,7 @@ ON CONFLICT(user_id, job_id) DO UPDATE SET
   notified_at = COALESCE(user_jobs.notified_at, excluded.notified_at);
 
 -- Leaving the retired copy behind would list the same application twice, since
--- «Подался» keys off applied_at and does not care whether the row is closed.
+-- Applied keys off applied_at and does not care whether the row is closed.
 DELETE FROM jobs WHERE id IN (
   SELECT dead.id
   FROM user_jobs uj

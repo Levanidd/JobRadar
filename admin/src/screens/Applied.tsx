@@ -2,8 +2,9 @@ import { useCallback, useMemo, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useLoader } from "../app-context"
+import { getLang, useT } from "../i18n"
 import { oneOf, usePersistentState } from "../persist"
-import { JobCard, openOnDoubleClick } from "../components/JobCard"
+import { JobCard, openOnDoubleClick, statusLabel } from "../components/JobCard"
 import { SortHeader } from "../components/SortHeader"
 import { Age, Count, Empty, Field, ScoreBadge, Skeletons, formatSalary } from "../components/common"
 import type { Job, JobStatus } from "../types"
@@ -17,22 +18,22 @@ function todayLocal(): string {
 export type PipeFilter = "" | "applied" | "interview" | "rejected"
 export type InterviewedFilter = "" | "yes" | "no"
 
-const PIPE: Array<{ id: PipeFilter; label: string }> = [
-  { id: "", label: "Все" },
-  { id: "applied", label: "Подался" },
-  { id: "interview", label: "Интервью" },
-  { id: "rejected", label: "Отказ" },
-]
-
-const PIPE_LABELS: Record<"applied" | "interview" | "rejected", string> = {
-  applied: "Подался",
-  interview: "Интервью",
-  rejected: "Отказ",
-}
+const PIPE: PipeFilter[] = ["", "applied", "interview", "rejected"]
 
 function pipeLabel(status: JobStatus): string {
-  if (status === "applied" || status === "interview" || status === "rejected") return PIPE_LABELS[status]
+  if (status === "applied" || status === "interview" || status === "rejected") return statusLabel(status)
   return status
+}
+
+/** English has one plural. Russian keeps the three forms the counter already asks for. */
+function countForms(
+  t: (english: string) => string,
+  one: string,
+  few: string,
+  many: string,
+): [string, string, string] {
+  if (getLang() !== "ru") return [one, many, many]
+  return [t(one), t(few), t(many)]
 }
 
 type AppliedSort = "title" | "company" | "score" | "posted" | "added" | "updated" | "applied" | "status"
@@ -99,6 +100,7 @@ function reviveSort(raw: unknown): AppliedSort | null | undefined {
 }
 
 function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void; onCancel: () => void }) {
+  const t = useT()
   const run = useAction()
   const [busy, setBusy] = useState(false)
   const [title, setTitle] = useState("")
@@ -136,9 +138,9 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
 
   return (
     <article className="card">
-      <h3 className="card-title">Своя вакансия</h3>
+      <h3 className="card-title">{t("Your own job")}</h3>
       <p className="card-sub">
-        Для позиций без ATS: заполни карточку и приложи ссылку. Она сразу попадёт в «Подался».
+        {t("For roles without an ATS: fill in the card and add a link. It lands in Applied right away.")}
       </p>
 
       <form
@@ -149,7 +151,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
         }}
       >
         <div className="form-span">
-          <Field label="Ссылка на позицию">
+          <Field label={t("Link to the role")}>
             <input
               className="input"
               type="url"
@@ -160,7 +162,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
             />
           </Field>
         </div>
-        <Field label="Должность">
+        <Field label={t("Job title")}>
           <input
             className="input"
             required
@@ -168,7 +170,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
             onChange={(event) => setTitle(event.target.value)}
           />
         </Field>
-        <Field label="Компания">
+        <Field label={t("Company")}>
           <input
             className="input"
             required
@@ -176,7 +178,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
             onChange={(event) => setCompany(event.target.value)}
           />
         </Field>
-        <Field label="Локация">
+        <Field label={t("Location")}>
           <input
             className="input"
             placeholder="Berlin · Remote"
@@ -184,7 +186,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
             onChange={(event) => setLocation(event.target.value)}
           />
         </Field>
-        <Field label="Дата отклика">
+        <Field label={t("Date applied")}>
           <input
             className="input"
             type="date"
@@ -193,7 +195,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
           />
         </Field>
         <div className="form-salary">
-          <Field label="Зарплата от, в год">
+          <Field label={t("Salary from, per year")}>
             <input
               className="input"
               type="number"
@@ -204,7 +206,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
               onChange={(event) => setSalaryMin(event.target.value)}
             />
           </Field>
-          <Field label="До">
+          <Field label={t("To")}>
             <input
               className="input"
               type="number"
@@ -215,7 +217,7 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
               onChange={(event) => setSalaryMax(event.target.value)}
             />
           </Field>
-          <Field label="Валюта">
+          <Field label={t("Currency")}>
             <select className="select" value={currency} onChange={(event) => setCurrency(event.target.value)}>
               <option value="EUR">EUR</option>
               <option value="USD">USD</option>
@@ -224,31 +226,31 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
             </select>
           </Field>
         </div>
-        <Field label="Статус">
+        <Field label={t("Status")}>
           <select
             className="select"
             value={status}
             onChange={(event) => setStatus(event.target.value as "applied" | "interview")}
           >
-            <option value="applied">Подался</option>
-            <option value="interview">Интервью</option>
+            <option value="applied">{statusLabel("applied")}</option>
+            <option value="interview">{statusLabel("interview")}</option>
           </select>
         </Field>
         <div className="form-span">
-          <Field label="Описание">
+          <Field label={t("Description")}>
             <textarea
               className="textarea textarea-notes"
-              placeholder="Что требует роль, стек, условия…"
+              placeholder={t("What the role needs, the stack, the terms…")}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
           </Field>
         </div>
         <div className="form-span">
-          <Field label="Заметки">
+          <Field label={t("Notes")}>
             <textarea
               className="textarea textarea-notes"
-              placeholder="С кем говорил, что отправил, следующие шаги…"
+              placeholder={t("Who you talked to, what you sent, next steps…")}
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
             />
@@ -256,10 +258,10 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
         </div>
         <div className="row form-span">
           <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>
-            {busy ? "Сохраняю…" : "Добавить"}
+            {busy ? t("Saving…") : t("Add")}
           </button>
           <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={onCancel}>
-            Отмена
+            {t("Cancel")}
           </button>
         </div>
       </form>
@@ -274,6 +276,7 @@ export function Applied({
   preset?: { status?: PipeFilter; interviewed?: InterviewedFilter }
   onOpenCompany: (company: { company_key: string }) => void
 }) {
+  const t = useT()
   const run = useAction()
   // A preset arrives from the Stats tab, where the user picked the bucket by
   // clicking a number — that pick should not become tomorrow's default view.
@@ -369,7 +372,7 @@ export function Applied({
       <>
         <div className="row">
           <button className="btn btn-ghost btn-sm" onClick={() => setComposing(false)}>
-            ← К списку
+            {t("← Back to the list")}
           </button>
         </div>
         <ManualJobForm
@@ -405,81 +408,83 @@ export function Applied({
   return (
     <>
       <div className="row">
-        {PIPE.map((item) => (
+        {PIPE.map((id) => (
           <button
-            key={item.id || "all"}
-            className={`btn btn-sm ${status === item.id ? "btn-primary" : "btn-ghost"}`}
-            onClick={() => setStatus(item.id)}
+            key={id || "all"}
+            className={`btn btn-sm ${status === id ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => setStatus(id)}
           >
-            {item.label}
+            {id ? statusLabel(id) : t("All")}
           </button>
         ))}
         {status === "rejected" ? (
           <select
             className="select select-inline"
-            aria-label="Собес"
+            aria-label={t("Interview")}
             value={interviewed}
             onChange={(event) => setInterviewed(event.target.value as InterviewedFilter)}
           >
-            <option value="">Все</option>
-            <option value="yes">Был собес</option>
-            <option value="no">Без собеса</option>
+            <option value="">{t("All")}</option>
+            <option value="yes">{t("Had an interview")}</option>
+            <option value="no">{t("No interview")}</option>
           </select>
         ) : null}
         <button className="btn btn-primary btn-sm" onClick={() => setComposing(true)}>
-          Добавить вакансию
+          {t("Add a job")}
         </button>
       </div>
 
-      {rows?.length ? <Count shown={rows.length} forms={["отклик", "отклика", "откликов"]} /> : null}
+      {rows?.length ? (
+        <Count shown={rows.length} forms={countForms(t, "application", "a few applications", "applications")} />
+      ) : null}
 
       {rows === null ? (
         <Skeletons />
       ) : rows.length === 0 ? (
         <Empty
-          title="Пока пусто"
-          hint="Отметьте «Подался» в списке вакансий или добавьте позицию вручную, если её нет на ATS."
+          title={t("Nothing here yet")}
+          hint={t("Mark Applied in the job list, or add a role by hand if it isn't on an ATS.")}
         />
       ) : (
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <SortHeader column="title" label="Вакансия" sort={sort} dir={dir} onSort={sortBy} />
-                <SortHeader column="company" label="Компания" sort={sort} dir={dir} onSort={sortBy} className="col-company" />
+                <SortHeader column="title" label={t("Job")} sort={sort} dir={dir} onSort={sortBy} />
+                <SortHeader column="company" label={t("Company")} sort={sort} dir={dir} onSort={sortBy} className="col-company" />
                 <SortHeader column="score" label="Score" sort={sort} dir={dir} onSort={sortBy} className="col-score" />
-                <SortHeader column="posted" label="Опубликована" sort={sort} dir={dir} onSort={sortBy} className="col-date" />
+                <SortHeader column="posted" label={t("Posted")} sort={sort} dir={dir} onSort={sortBy} className="col-date" />
                 <SortHeader
                   column="added"
-                  label="Добавлена"
+                  label={t("Added")}
                   sort={sort}
                   dir={dir}
                   onSort={sortBy}
                   className="col-date"
-                  title="Когда мы впервые увидели вакансию"
+                  title={t("When we first saw the job")}
                 />
                 <SortHeader
                   column="updated"
-                  label="Обновлена"
+                  label={t("Updated")}
                   sort={sort}
                   dir={dir}
                   onSort={sortBy}
                   className="col-date"
-                  title="Когда вакансия изменилась у источника"
+                  title={t("When the job changed at the source")}
                 />
                 <SortHeader
                   column="applied"
-                  label="Подался"
+                  label={statusLabel("applied")}
                   sort={sort}
                   dir={dir}
                   onSort={sortBy}
                   className="col-date"
-                  title="Когда вы отметили отклик"
+                  title={t("When you marked that you applied")}
                 />
-                <SortHeader column="status" label="Статус" sort={sort} dir={dir} onSort={sortBy} />
+                <SortHeader column="status" label={t("Status")} sort={sort} dir={dir} onSort={sortBy} />
                 {status === "rejected" ? (
-                  <th className="col-check" title="До отказа было собеседование">
-                    Собес
+                  <th className="col-check" title={t("There was an interview before the rejection")}>
+                    {t("Interview")}
                   </th>
                 ) : null}
               </tr>
@@ -489,7 +494,7 @@ export function Applied({
                 <tr
                   key={job.id}
                   className="row-open"
-                  title="Двойной клик — открыть карточку"
+                  title={t("Double-click to open the card")}
                   onDoubleClick={openOnDoubleClick(() => void openCard(job))}
                 >
                   <td>
@@ -505,7 +510,7 @@ export function Applied({
                     <button
                       type="button"
                       className="cell-link"
-                      title={`Все вакансии ${job.company}`}
+                      title={t("All jobs at {company}", { company: job.company })}
                       onClick={() => onOpenCompany(job)}
                     >
                       {job.company}
@@ -537,7 +542,11 @@ export function Applied({
                         checked={Boolean(job.interviewed_at)}
                         readOnly
                         tabIndex={-1}
-                        aria-label={job.interviewed_at ? `Был собес: ${job.title}` : `Собеса не было: ${job.title}`}
+                        aria-label={
+                          job.interviewed_at
+                            ? t("Had an interview: {title}", { title: job.title })
+                            : t("No interview: {title}", { title: job.title })
+                        }
                         onClick={(event) => event.preventDefault()}
                       />
                     </td>

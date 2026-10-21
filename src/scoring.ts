@@ -1,3 +1,4 @@
+import { pick } from "./locale"
 import { passesPrefilter, clipDescription } from "./prefilter"
 
 export type ScoreInput = {
@@ -504,7 +505,7 @@ async function listNebiusModels(apiKey: string): Promise<ModelOption[]> {
       if (input === null || output === null) return { id: model.id!, label }
       return {
         id: model.id!,
-        label: `${label} · $${input.toFixed(2)} / $${output.toFixed(2)} за 1M`,
+        label: `${label} · $${input.toFixed(2)} / $${output.toFixed(2)} ${pick("per 1M", "за 1M")}`,
         price_in_per_m: input,
         price_out_per_m: output,
       }

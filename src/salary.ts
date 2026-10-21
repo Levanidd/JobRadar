@@ -78,7 +78,7 @@ export function formatSalary(min: number | null | undefined, max: number | null 
   if (min != null && max != null && min !== max) return `${symbol}${compact(min)}–${compact(max)}`
   const amount = min ?? max
   if (amount == null) return null
-  if (min != null && max == null) return `от ${symbol}${compact(min)}`
-  if (min == null && max != null) return `до ${symbol}${compact(max)}`
+  if (min != null && max == null) return `from ${symbol}${compact(min)}`
+  if (min == null && max != null) return `up to ${symbol}${compact(max)}`
   return `${symbol}${compact(amount)}`
 }

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
+import { useT } from "../i18n"
+
 export type Option = { value: string; label: string; hint?: string }
 
 type Props = {
@@ -10,6 +12,7 @@ type Props = {
 }
 
 export function MultiSelect({ label, options, selected, onChange }: Props) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const root = useRef<HTMLDivElement>(null)
@@ -60,7 +63,7 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
         <div className="multiselect-panel">
           <input
             className="input multiselect-search"
-            placeholder="Поиск"
+            placeholder={t("Search")}
             value={search}
             autoFocus
             onChange={(event) => setSearch(event.target.value)}
@@ -68,7 +71,7 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
 
           <div className="multiselect-list">
             {visible.length === 0 ? (
-              <p className="muted multiselect-empty">Ничего не найдено</p>
+              <p className="muted multiselect-empty">{t("No results")}</p>
             ) : (
               visible.map((item) => (
                 <label key={item.value} className="multiselect-option">
@@ -87,7 +90,7 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
 
           {selected.length > 0 ? (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange([])}>
-              Сбросить выбор
+              {t("Clear selection")}
             </button>
           ) : null}
         </div>

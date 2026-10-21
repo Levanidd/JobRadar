@@ -1,5 +1,7 @@
 import type { ReactNode } from "react"
 
+import { getLang } from "../i18n"
+
 export function Empty({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="empty">
@@ -37,7 +39,7 @@ export function Count({
   return (
     <p className="count">
       {shown} {plural(shown, forms)}
-      {total !== undefined && total !== shown ? ` из ${total}` : ""}
+      {total !== undefined && total !== shown ? ` ${getLang() === "ru" ? "из" : "of"} ${total}` : ""}
       {children}
     </p>
   )
@@ -46,7 +48,7 @@ export function Count({
 export function ScoreBadge({ score, hint }: { score: number | null; hint?: string }) {
   if (score == null) {
     return (
-      <span className="score badge-neutral" title={hint ?? "Ещё не оценена"}>
+      <span className="score badge-neutral" title={hint ?? (getLang() === "ru" ? "Ещё не оценена" : "Not scored yet")}>
         —
       </span>
     )
@@ -55,11 +57,11 @@ export function ScoreBadge({ score, hint }: { score: number | null; hint?: strin
   return <span className={`score ${tone}`}>{score}</span>
 }
 
-const FLAG_LABELS: Record<string, string> = {
-  german_required: "немецкий C1",
-  not_senior: "не сеньор",
-  relocation_only: "релокация",
-  agency_posting: "агентство",
+const FLAG_LABELS: Record<string, { en: string; ru: string }> = {
+  german_required: { en: "German C1", ru: "немецкий C1" },
+  not_senior: { en: "not senior", ru: "не сеньор" },
+  relocation_only: { en: "relocation", ru: "релокация" },
+  agency_posting: { en: "agency", ru: "агентство" },
 }
 
 function parseFlags(raw: string | null): string[] {
@@ -79,7 +81,7 @@ export function Flags({ raw }: { raw: string | null }) {
     <div className="row-tight" style={{ flexWrap: "wrap" }}>
       {flags.map((flag) => (
         <span key={flag} className="badge badge-negative">
-          {FLAG_LABELS[flag] ?? flag}
+          {FLAG_LABELS[flag]?.[getLang()] ?? flag}
         </span>
       ))}
     </div>
@@ -106,7 +108,13 @@ export function parseDate(value: string | null): Date | null {
 export function formatDate(value: string | null): string {
   const date = parseDate(value)
   if (!date) return value ?? "—"
-  return date.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+  const lang = getLang()
+  return date.toLocaleString(lang === "ru" ? "ru-RU" : "en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }
 
 const SALARY_SYMBOLS: Record<string, string> = {
@@ -129,8 +137,10 @@ export function formatSalary(min?: number | null, max?: number | null, currency?
   if (min != null && max != null && min !== max) return `${symbol}${compactPay(min)}–${compactPay(max)}`
   const amount = min ?? max
   if (amount == null) return null
-  if (min != null && max == null) return `от ${symbol}${compactPay(min)}`
-  if (min == null && max != null) return `до ${symbol}${compactPay(max)}`
+  const from = getLang() === "ru" ? "от" : "from"
+  const upTo = getLang() === "ru" ? "до" : "up to"
+  if (min != null && max == null) return `${from} ${symbol}${compactPay(min)}`
+  if (min == null && max != null) return `${upTo} ${symbol}${compactPay(max)}`
   return `${symbol}${compactPay(amount)}`
 }
 
@@ -155,7 +165,17 @@ export function Age({ value, warnAfter = 30 }: { value: string | null; warnAfter
 
   const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / DAY_MS))
   const label =
-    days === 0 ? "сегодня" : days === 1 ? "вчера" : `${days} ${plural(days, ["день", "дня", "дней"])}`
+    getLang() === "ru"
+      ? days === 0
+        ? "сегодня"
+        : days === 1
+          ? "вчера"
+          : `${days} ${plural(days, ["день", "дня", "дней"])}`
+      : days === 0
+        ? "today"
+        : days === 1
+          ? "yesterday"
+          : `${days} ${days === 1 ? "day" : "days"}`
   const tone = days >= warnAfter * 2 ? "age-stale" : days >= warnAfter ? "age-aging" : "age-fresh"
 
   return (

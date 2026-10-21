@@ -1,5 +1,7 @@
 import { useState, type FormEvent, type KeyboardEvent } from "react"
 
+import { useT } from "../i18n"
+
 function collapseSpaces(value: string): string {
   return value.trim().replace(/\s+/g, " ")
 }
@@ -13,6 +15,7 @@ type Props = {
 }
 
 export function TagEditor({ tags, onChange, tone, placeholder, disabled }: Props) {
+  const t = useT()
   const [draft, setDraft] = useState("")
 
   function add(raw: string) {
@@ -49,7 +52,7 @@ export function TagEditor({ tags, onChange, tone, placeholder, disabled }: Props
                 type="button"
                 className="tag-remove"
                 disabled={disabled}
-                aria-label={`Удалить ${tag}`}
+                aria-label={t("Remove {tag}", { tag })}
                 onClick={() => onChange(tags.filter((item) => item.toLowerCase() !== tag.toLowerCase()))}
               >
                 ×
@@ -58,7 +61,7 @@ export function TagEditor({ tags, onChange, tone, placeholder, disabled }: Props
           ))}
         </div>
       ) : (
-        <p className="muted">Нет тегов</p>
+        <p className="muted">{t("No tags")}</p>
       )}
       <form className="tag-add" onSubmit={onSubmit}>
         <input
@@ -70,7 +73,7 @@ export function TagEditor({ tags, onChange, tone, placeholder, disabled }: Props
           onKeyDown={onKeyDown}
         />
         <button className="btn btn-sm" type="submit" disabled={disabled || !collapseSpaces(draft)}>
-          Добавить
+          {t("Add")}
         </button>
       </form>
     </div>
