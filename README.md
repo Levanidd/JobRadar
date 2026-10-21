@@ -1,176 +1,96 @@
 # JobRadar
 
-A Cloudflare Worker that pulls jobs from company ATS boards and query sources (Arbeitsagentur, Arbeitnow, and others), dedupes them, scores them, and serves a React admin from the same origin.
+**A shared job catalog with a private verdict for each person.** JobRadar pulls openings from company ATS boards and query sources, dedupes them, and scores each one against that person's profile. Two people can look at the same posting and keep different scores, statuses and applications. A React admin is served from the same Worker.
 
-Spec: [`docs/SPEC.md`](docs/SPEC.md).
+- **Live:** https://jobradar.kurdyukov-leo-ger.workers.dev
+- **Spec:** [`docs/SPEC.md`](docs/SPEC.md)
+
+## How it works
+
+```mermaid
+flowchart LR
+  UI[React admin] -- Bearer token --> W[Cloudflare Worker<br/>Hono]
+  Cron[Cron every minute] --> W
+  W --> D1[(D1<br/>jobs shared · user_jobs private)]
+  W --> ATS[ATS adapters<br/>Greenhouse, Lever, Ashby, …]
+  W --> LLM[Gemini or<br/>Nebius Token Factory]
+```
+
+1. **One posting, many verdicts.** `jobs`, `sources` and discovered companies are shared. Score, status, notes, CV link, interview stages and the profile live on `user_jobs` / `user_profiles`, keyed by `user_id`. Marking a job `applied` updates only that person's row. The other person's status, score and "Applied" list stay as they were.
+2. **The model only sees what survived the person's own gates.** Keep/drop tags on the title and the company blacklist run in code, per user, before any LLM call. A title that fails the prefilter is parked as `off_profile` with score 0 and is never sent. A duplicate the same person already scored copies their old verdict instead of calling the model again.
+3. **Scoring rules live in the profile, not in code.** `scoringSystemPrompt` inserts `user_profiles.content` and tells the model that this text is the only source of rules. Flag names and the JSON shape stay in the output contract (`FLAGS`, the response schema, `CHAT_JSON_HINT`). Production sends up to 10 clipped postings (8 000 characters of description) in one request. The provider, model and Gemini thinking level are global and chosen by the master. With no key, a local keyword heuristic scores instead.
+4. **A run is a chain of short hops, not one request.** Ingest and scoring move in `waitUntil` slices (boards written 400 jobs at a time) so a hop fits the Worker budget. Cron (`* * * * *`) resumes a cycle that has not moved for 25 seconds, which is why the tab can be closed. The first pass of a source (`bootstrapped = 0`) does not notify.
+5. **Detection reads the board the adapter can fetch, not the marketing page.** `POST /api/detect` looks for an ATS URL in the HTML (Greenhouse, Lever, Ashby, Workday, and the rest), then guesses a slug on the company domain. A careers page that paints the list in the browser, or a board whose slug is not the domain (`checkout.com`, `starling-bank`, `Superhuman Platform Inc`), is added by pasting the vendor URL directly.
+6. **Lab measures the production prompt and writes nothing production reads.** A master samples up to 30 already-scored postings and replays each one, one request at a time, through up to 6 models and 5 repeats (300 trials). The profile and system prompt are snapshotted at creation, so a clone sends the same input. Lab writes only `lab_*` tables and one model-usage batch. Trials run 4 at a time; a compare-and-swap on `lab_runs.hops` keeps the tab, a new walker and cron from running the same hop twice. A trial the Worker drops before the model answers is retried, then kept as `timeout` ("попытка брошена воркером").
+
+Sign-in is a personal token. The first login with `ADMIN_TOKEN`, while `users` is empty, creates the master and copies the current profile, scores and statuses. Issued tokens are stored as a hash; the master can show and rotate the plaintext of tokens they created. The token in the admin lives in `sessionStorage` for that tab.
 
 ## Stack
 
-TypeScript, Hono, Cloudflare Workers, D1, Cron. LLM scoring is optional: Google Gemini (`GEMINI_API_KEY`) or Nebius Token Factory (`NEBIUS_API_KEY`), picked in Settings. Without a key for the chosen provider, a local keyword heuristic is used.
+- **Cloudflare Workers + Hono.** `src/index.ts` only mounts routes, checks the token and catches errors. Domain code lives in `src/routes/`. The same Worker serves `admin/dist` through the assets binding; a static file wins when it exists, so `/api/*` still hits the Worker.
+- **D1** (`job-scout`). Migrations in `migrations/` are applied by hand. They are not part of a code deploy.
+- **React + Vite** admin. Tabs: Resources (Discovery, Explore, Sources), Jobs, Applied, Stats, Profile, Settings (master), Lab (master), Guide.
+- **Scoring:** Google Gemini or Nebius Token Factory (OpenAI-compatible). The master picks the provider, model and thinking level in Settings. Every model call is logged (tokens, timing) and shown under Settings → Model requests.
+- **Cron** resumes a stalled cycle and starts a run when a slot of the master's Europe/Berlin schedule is due.
 
-## Run it yourself
+## Run locally
 
-Needs Node 20+, npm, and a Cloudflare account.
+Needs Node 20+ and npm.
 
 ```bash
+git clone https://github.com/Levanidd/JobRadar.git && cd JobRadar
 npm install
-cp .dev.vars.example .dev.vars
-# set ADMIN_TOKEN in .dev.vars (required)
-
-npm test
-npx wrangler login
-npx wrangler d1 create job-scout
+cp .dev.vars.example .dev.vars          # set ADMIN_TOKEN
+npm test                                 # tsc --noEmit + vitest
+npm run dev                              # http://127.0.0.1:43142
 ```
 
-Copy the `database_id` from that output into `wrangler.toml`.
+`GET /api/health` is the liveness check. For admin hot reload, keep `npm run dev` running and start `npm run admin:dev` (Vite on 5173, proxies `/api` to 43142).
 
-```bash
-npx wrangler d1 migrations apply job-scout --remote
+Ingest and API tests boot SQLite in memory, apply the real migrations, and call the Worker through `app.fetch`, so the SQL is the SQL D1 runs. `npm run eval` scores 20 jobs and targets at most 3 mismatches.
 
-npx wrangler secret put ADMIN_TOKEN
-npx wrangler secret put GEMINI_API_KEY         # Gemini scoring; without it, local heuristic
-npx wrangler secret put GEMINI_MODEL           # optional, defaults to gemini-3.7-flash
-npx wrangler secret put NEBIUS_API_KEY         # optional, Nebius Token Factory scoring
-npx wrangler secret put TELEGRAM_BOT_TOKEN     # digest; without it, jobs stay in D1
-npx wrangler secret put TELEGRAM_CHAT_ID
-
-npm run deploy
-```
-
-Locally: `npm run dev` → `GET http://127.0.0.1:43142/api/health`.
-
-A run starts from the admin **Run** button (`POST /api/run`) or from the master's auto-run schedule. Cron (`* * * * *`) also resumes a cycle that Cloudflare dropped mid-`waitUntil` if nothing moved for 25 seconds, so you can close the tab. Large boards are written in slices of 400 jobs so one hop fits the Worker budget.
-
-## Admin
-
-React + Vite in `admin/`, built to `admin/dist`, served through the Worker assets binding. Static files win only when they exist, so `/api/*` still hits the Worker.
-
-Tabs: Resources (Discovery, Explore, Sources), Jobs, Applied, Stats, Profile, Settings (master only), Lab (master only), Guide.
-
-Sign-in is a personal token. The first login with `ADMIN_TOKEN` creates the master; everyone else gets a token from Settings → Users. The token lives in `sessionStorage` for that tab. The master can view and rotate issued tokens. Their own `ADMIN_TOKEN` login cannot be shown, because that secret is not stored in the database.
-
-Jobs, sources, and discovery are shared. Prefilter, blacklist, scoring, applications, and statuses are per user. Anyone can add a source; only the master can disable, delete, pick the model, or edit the auto-run schedule. The Telegram digest is currently off.
-
-Filters and sort survive reload in `localStorage` under `jobradar.<screen>.*`. A job list opened from a source or company card is not saved: it is a one-off slice, not the user's chosen view.
-
-```bash
-npm run build       # build the admin
-npm run admin:dev   # Vite on 5173, proxying /api to 43142
-```
+A run starts from **Run** in the admin (`POST /api/run`) or from the auto-run schedule.
 
 ## Deploy
 
-A push to `main` deploys: Workers Builds is wired with build command `npm run build` and deploy command `npx wrangler deploy`. You do not need to ship by hand.
+A push to `main` deploys. Workers Builds uses `npm run build`, then `npx wrangler deploy`.
 
-`npm run deploy` is for shipping without git. It starts with `npm --prefix admin ci`, which deletes and reinstalls `admin/node_modules` — slow locally, and it has hung after already finishing the work.
+`npm run deploy` is the path without git. It starts with `npm --prefix admin ci`, which deletes and reinstalls `admin/node_modules`. Slow locally, and it has hung after the work was already done.
 
-D1 migrations are not applied by a code deploy. After a migration is added:
+After a migration is added:
 
 ```bash
 npx wrangler d1 migrations apply job-scout --remote
 ```
 
-## API
+### Configuration
 
-Every path except `/` and `/api/health` needs:
-
-`Authorization: Bearer <user token>`
-
-The first login with `ADMIN_TOKEN`, while `users` is empty, creates the master and copies the current profile, scores, and statuses. After that the same secret only works if its hash is stored on a user row.
-
-| Method | Path | Purpose |
+| Secret | Required | Purpose |
 |---|---|---|
-| GET | `/api/health` | liveness |
-| GET | `/api/me` | current user |
-| GET/POST | `/api/users` | list and create (master) |
-| PATCH | `/api/users/:id` | name and role (master; the last master cannot be demoted) |
-| POST | `/api/users/:id/token` | rotate token (master); the old one stops working immediately |
-| GET/PUT | `/api/users/:id/profile` | another person's prefilter / blacklist / scoring text |
-| POST | `/api/users/:id/rescore` | rescore that person |
-| GET/POST | `/api/sources` | sources; anyone can add |
-| PATCH/DELETE | `/api/sources/:id` | disable / rename / delete — master only |
-| POST | `/api/sources/:id/run` | run one source |
-| GET/POST | `/api/run` | cycle status / start ingest + score |
-| GET/PUT | `/api/run/schedule` | auto-run slots in Europe/Berlin (master) |
-| GET | `/api/run/log` | run history, 10 per page (master) |
-| POST | `/api/detect` | `{url}` → ATS |
-| POST | `/api/sources/bulk-detect` | `{urls:[]}` |
-| GET | `/api/discovered?state=new` | new companies |
-| POST | `/api/discovered/:key/add` | add to watchlist |
-| POST | `/api/discovered/:key/dismiss` | hide |
-| GET | `/api/jobs` | `?status=&min_score=&tier=&companies=&added_days=&added_from=&viewed=&later=&applied=&sort=&dir=`; `status=any` includes off-profile |
-| GET | `/api/jobs/companies` | companies with counts under the same filters |
-| PATCH | `/api/jobs/:id` | `{status}`, `{notes}`, `{viewed}`, or `{later}` — own rows only |
-| GET | `/api/applied` | applications; `?status=applied\|interview\|rejected` |
-| POST | `/api/applied` | a job entered by hand, no ATS |
-| GET | `/api/stats` | found / viewed / applied funnel, application breakdown, week and month series; `?days=N` limits the funnel and breakdown, series stay at 12 weeks and 12 months |
-| GET/PUT | `/api/profile` | scoring text, keep/drop tags, company blacklist |
-| POST | `/api/profile/rescore` | clear scores and rescore |
-| GET/PUT | `/api/settings` | scoring provider, model, thinking level — master only |
-| GET | `/api/models?provider=gemini\|nebius` | models available for the provider's key |
-| GET | `/api/runs` | last 50 source runs |
-| POST | `/api/lab/preview` | pool size, sample size, trial count and cost estimate for a draft lab run (master) |
-| GET/POST | `/api/lab/runs` | lab run history, 10 per page / create and start a run (master) |
-| GET/DELETE | `/api/lab/runs/:id` | run with candidates, postings, trials, matrix cells and per-model summary / delete a finished run (master) |
-| GET | `/api/lab/runs/:id/jobs/:jobId` | the clipped description a model saw and raw responses (master) |
-| POST | `/api/lab/runs/:id/tick` | restart a stalled run from the open tab (master) |
-| POST | `/api/lab/runs/:id/cancel` | stop queued trials; in-flight ones finish (master) |
-| POST | `/api/lab/runs/:id/retry` | requeue failed trials; `{trial_ids:[]}` for specific ones (master) |
-| POST | `/api/lab/runs/:id/clone` | same postings and profile snapshot, new models or repeats (master) |
-| GET | `/api/lab/runs/:id/export.csv` | one row per trial, UTF-8 with BOM (master) |
-| POST | `/api/mcp` | MCP for Claude and Cursor: read-only SQL. Tools `schema` and `query` (one SELECT) |
-
-Routes live by domain in `src/routes/`. `src/index.ts` only assembles the app, checks the token, and catches errors.
-
-MCP uses the same Worker URL and personal token as the admin. Writes are rejected.
-
-```json
-{
-  "mcpServers": {
-    "jobradar": {
-      "url": "https://<worker>/api/mcp",
-      "headers": { "Authorization": "Bearer <personal token>" }
-    }
-  }
-}
-```
-
-Claude Code: `claude mcp add --transport http jobradar https://<worker>/api/mcp --header "Authorization: Bearer <personal token>"`.
-
-In Cursor, put the same JSON in MCP settings. Do not commit the token.
-
-The first run of a source with `bootstrapped=0` does not send notifications (cold start).
-
-## Model Lab
-
-Lab compares scoring models before the production one is switched. It samples up to 30 postings that already have a score for one user, either evenly from 0–39 / 40–69 / 70–100 or at random, optionally with up to 30% from postings that user applied to, interviewed for, saved, or rejected. A seed makes the sample reproducible on the same pool. Each posting goes to up to 6 candidate models (Gemini or Nebius, Gemini with a thinking level) 1–5 times, at most 300 trials per run, with the same system prompt and clipping as production. The profile and prompt are snapshotted at creation, so a clone replays the same input through other models.
-
-Lab only writes `lab_runs`, `lab_candidates`, `lab_jobs`, `lab_trials` and the model usage log. It never touches `jobs`, `user_jobs`, `sources`, `discovered_companies` or `settings`. Usage shows up in Settings → Model requests as one batch of kind `lab` per run. API keys never reach trials, the usage log, or responses.
-
-Trials run 4 at a time in `waitUntil` hops of up to 25 seconds. A hop claims the run with a compare-and-swap on `lab_runs.hops`, so the tab's tick, a fresh walker, and cron never run it twice. Cron resumes a run that has not moved for 25 seconds. Rate limits, 5xx, and timeouts retry up to 3 attempts; other failures are kept with an error code (`http_4xx`, `malformed_json`, `missing_score`, `empty`, `error`) and can be retried from the run screen.
-
-The run screen compares each model against the stored score ("baseline", the production scorer's answer, not ground truth): MAE, mean SD between repeats, flip rate around 70, agreement with the baseline's ping decision, recall on postings the user applied to, interviewed for, or saved, german-flag match, error share, p50/p95 latency, tokens, run cost, and a monthly forecast at 9,000 postings. The matrix shows every repeat per posting with Δ to baseline and flip/spread warnings; a row opens to the exact description the model saw and the raw responses. Tables come from migration `0030_model_lab.sql`.
-
-## Secrets
-
-| Name | Purpose |
-|---|---|
-| `ADMIN_TOKEN` | creates the first master; later logins use personal tokens |
-| `GEMINI_API_KEY` | Gemini scoring |
-| `GEMINI_MODEL` | model name, default `gemini-3.7-flash` |
-| `NEBIUS_API_KEY` | Nebius Token Factory scoring (OpenAI-compatible API); `CHANGE_ME` counts as unset |
-| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | digest |
-| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | optional source |
+| `ADMIN_TOKEN` | yes | Creates the first master. Later logins use personal tokens. |
+| `GEMINI_API_KEY` | for Gemini | Scoring. `CHANGE_ME` counts as unset, and the heuristic runs instead. |
+| `GEMINI_MODEL` | no | Default `gemini-3.7-flash`. The model saved in Settings wins over this secret. |
+| `NEBIUS_API_KEY` | for Nebius | Token Factory scoring. `CHANGE_ME` counts as unset. |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | no | Digest. Currently off; without them, jobs stay in D1. |
+| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | no | Optional source. |
 
 The Arbeitsagentur key is public and lives in code.
 
-## Tests
+Every path except `/` and `/api/health` needs `Authorization: Bearer <personal token>`. Routes are mounted by domain from `src/routes/`. The contract is in [`docs/SPEC.md`](docs/SPEC.md).
 
-```bash
-npm test              # tsc --noEmit + vitest
-npm run typecheck     # Worker types only
-npm run typecheck:admin
-npm run eval          # 20 jobs, target ≤3 mismatches
-```
+## MCP
 
-Ingest and API tests spin up SQLite in memory, apply the real migrations, and call the Worker through `app.fetch`, so queries run against the same SQL that D1 would see.
+**Next release.** Not in this Worker yet. Spec: the JobRadar MCP requirements (Oct 21, 2026).
+
+A separate Worker, `jobradar-mcp`, will sit beside this one and use the same D1. Claude connects over Streamable HTTP (`/mcp`) and logs in once with the person's existing JobRadar token (OAuth 2.1, PKCE, Dynamic Client Registration). `user_id` comes only from that token. No tool accepts it as an argument, and none of them run SQL.
+
+Ten tools, five to read and five to write, all scoped to that person: search and list jobs, open one job, list applications, read the profile, set a status (`saved`, `applied`, `interview`, `rejected`, `ignored`), write `claude_comment`, save an `https` CV link, add an interview stage, update the profile. `new`, `notified` and `off_profile` stay owned by JobRadar. The catalog fields of `jobs` are readable. The old per-user columns still sitting on `jobs`, and `applied_history`, are not. CV files stay wherever the person keeps them. This server stores the link only.
+
+Today `/api/mcp` on this Worker is a different thing: read-only SQL (`schema` and one `SELECT`) for the operator, with the same personal token. The next release does not extend it.
+
+## Limits
+
+- A scoring or ingest hop has to finish inside the Worker `waitUntil` budget (about 30 seconds). Lab walks stop starting new work at 25 seconds and hand the run back.
+- Lab runs at most 300 trials, 4 at a time. A model that answers slower than the hop is dropped and retried up to 3 times, then marked `timeout`.
+- The Telegram digest is off.
+- Account deletion, a privacy policy, and revoking an MCP grant are part of the MCP release, not this one.
