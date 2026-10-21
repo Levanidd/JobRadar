@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { markMissingClosed, prefilterAndScore, upsertJobs } from "../src/ingest"
+import { archiveStaleSearchBoardJobs, markMissingClosed, prefilterAndScore, upsertJobs } from "../src/ingest"
 import type { RawJob, SourceRow } from "../src/types"
 import { TEST_USER_ID, one, rows, testEnv, type TestEnv } from "./helpers/d1"
 
@@ -549,5 +549,119 @@ describe("markMissingClosed", () => {
     expect(byUrl.get("https://himalayas.app/jobs/young")).toBeNull()
     expect(byUrl.get("https://himalayas.app/jobs/old")).toBeTruthy()
     expect(byUrl.get("https://himalayas.app/jobs/seen")).toBeNull()
+  })
+})
+
+describe("archiveStaleSearchBoardJobs", () => {
+  async function closeAt(url: string, closedAt: string): Promise<string> {
+    await env.DB.prepare(`UPDATE jobs SET closed_at = datetime('now', ?) WHERE url = ?`).bind(closedAt, url).run()
+    const row = await one<{ id: string }>(env, `SELECT id FROM jobs WHERE url = ?`, url)
+    if (!row) throw new Error("job not stored")
+    return row.id
+  }
+
+  it("archives a search-board job closed over a month ago when nobody applied", async () => {
+    const board = await addSource({ kind: "query", provider: "arbeitnow", token: "product" })
+    await upsertJobs(
+      env,
+      board,
+      [
+        job({ externalId: "old", url: "https://board.example/old" }),
+        job({ externalId: "fresh", url: "https://board.example/fresh", title: "Product Manager" }),
+        job({ externalId: "applied", url: "https://board.example/applied", title: "Product Lead" }),
+      ],
+      new Set(),
+    )
+    const oldId = await closeAt("https://board.example/old", "-40 days")
+    await closeAt("https://board.example/fresh", "-2 days")
+    const appliedId = await closeAt("https://board.example/applied", "-40 days")
+    await env.DB.prepare(
+      `INSERT INTO user_jobs (user_id, job_id, status, score) VALUES (?, ?, 'off_profile', 0)`,
+    )
+      .bind(TEST_USER_ID, oldId)
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO user_jobs (user_id, job_id, status, applied_at) VALUES (?, ?, 'applied', datetime('now'))`,
+    )
+      .bind(TEST_USER_ID, appliedId)
+      .run()
+
+    expect(await archiveStaleSearchBoardJobs(env, board)).toBe(1)
+
+    const left = await rows<{ url: string }>(env, `SELECT url FROM jobs ORDER BY url`)
+    expect(left.map((row) => row.url)).toEqual([
+      "https://board.example/applied",
+      "https://board.example/fresh",
+    ])
+    expect(await rows(env, `SELECT job_id FROM user_jobs WHERE job_id = ?`, oldId)).toEqual([])
+    expect(await one(env, `SELECT url, source_provider FROM archive_jobs`)).toMatchObject({
+      url: "https://board.example/old",
+      source_provider: "arbeitnow",
+    })
+    expect(await one(env, `SELECT job_id, status, score FROM archive_user_jobs`)).toMatchObject({
+      job_id: oldId,
+      status: "off_profile",
+      score: 0,
+    })
+  })
+
+  it("keeps a note, a Claude comment, or a CV link in the live table", async () => {
+    const board = await addSource({ kind: "query", provider: "jobicy", token: "product" })
+    await upsertJobs(
+      env,
+      board,
+      [
+        job({ externalId: "note", url: "https://board.example/note" }),
+        job({ externalId: "claude", url: "https://board.example/claude", title: "Product Manager" }),
+        job({ externalId: "cv", url: "https://board.example/cv", title: "Product Lead" }),
+      ],
+      new Set(),
+    )
+    const note = await closeAt("https://board.example/note", "-40 days")
+    const claude = await closeAt("https://board.example/claude", "-40 days")
+    const cv = await closeAt("https://board.example/cv", "-40 days")
+    await env.DB.prepare(`INSERT INTO user_jobs (user_id, job_id, status, notes) VALUES (?, ?, 'new', 'глянуть')`)
+      .bind(TEST_USER_ID, note)
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO user_jobs (user_id, job_id, status, claude_comment) VALUES (?, ?, 'new', 'сильный матч')`,
+    )
+      .bind(TEST_USER_ID, claude)
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO user_jobs (user_id, job_id, status, cv_url) VALUES (?, ?, 'new', 'https://cv.example/a.pdf')`,
+    )
+      .bind(TEST_USER_ID, cv)
+      .run()
+
+    expect(await archiveStaleSearchBoardJobs(env, board)).toBe(0)
+    expect(await rows(env, `SELECT id FROM jobs`)).toHaveLength(3)
+    expect(await rows(env, `SELECT id FROM archive_jobs`)).toEqual([])
+  })
+
+  it("leaves a company board untouched and unlinks copies that pointed at an archived row", async () => {
+    const company = await addSource()
+    await upsertJobs(env, company, [job({ url: "https://acme.example/jobs/keep" })], new Set())
+    const kept = await closeAt("https://acme.example/jobs/keep", "-40 days")
+
+    const board = await addSource({ kind: "company", provider: "himalayas", token: "*", label: "Himalayas" })
+    await upsertJobs(
+      env,
+      board,
+      [job({ externalId: "gone", url: "https://himalayas.app/jobs/gone", title: "Product Lead" })],
+      new Set(),
+    )
+    const gone = await closeAt("https://himalayas.app/jobs/gone", "-40 days")
+    await env.DB.prepare(`UPDATE jobs SET duplicate_of = ? WHERE id = ?`).bind(gone, kept).run()
+
+    expect(await archiveStaleSearchBoardJobs(env, company)).toBe(0)
+    expect(await archiveStaleSearchBoardJobs(env, board)).toBe(1)
+    expect(await one(env, `SELECT url, duplicate_of FROM jobs`)).toMatchObject({
+      url: "https://acme.example/jobs/keep",
+      duplicate_of: null,
+    })
+    expect(await one(env, `SELECT url FROM archive_jobs`)).toMatchObject({
+      url: "https://himalayas.app/jobs/gone",
+    })
   })
 })

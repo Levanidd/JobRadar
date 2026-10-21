@@ -102,7 +102,7 @@ export function isSuspicious(lastCount: number | null, found: number): boolean {
  * the page limit, so a posting stays open for a month from the day we first
  * saw it. A company board is the whole listing, and a miss there is a takedown.
  */
-const BOARD_OPEN_GRACE = "-1 month"
+const MONTH = "-1 month"
 
 export function boardKeepsYoungMisses(provider: string): boolean {
   return getAdapter(provider).kind === "query"
@@ -115,8 +115,88 @@ export async function markMissingClosed(env: Bindings, source: SourceRow, runSta
      WHERE source_id = ? AND closed_at IS NULL AND last_seen_at < ?
        AND (? = 0 OR first_seen_at < datetime('now', ?))`,
   )
-    .bind(source.id, runStart, grace, BOARD_OPEN_GRACE)
+    .bind(source.id, runStart, grace, MONTH)
     .run()
+}
+
+/** D1 binds at most 100 values, and a hop has to finish inside the worker budget. */
+const STALE_ARCHIVE_CHUNK = 80
+const STALE_ARCHIVE_PASSES = 40
+
+/** Anything a person attached, or an application, keeps the posting in the live list. */
+const WORTH_KEEPING = `uj.applied_at IS NOT NULL OR uj.interviewed_at IS NOT NULL
+  OR uj.status IN ('applied', 'interview')
+  OR TRIM(COALESCE(uj.notes, '')) != ''
+  OR TRIM(COALESCE(uj.claude_comment, '')) != ''
+  OR TRIM(COALESCE(uj.cv_url, '')) != ''`
+
+/**
+ * A search-board posting that fell out of the window, has been closed for a
+ * month, and nobody applied to, annotated, or attached a CV to, moves into
+ * the archive tables. Company boards stay in the live table.
+ */
+export async function archiveStaleSearchBoardJobs(env: Bindings, source: SourceRow): Promise<number> {
+  if (!boardKeepsYoungMisses(source.provider)) return 0
+  let moved = 0
+  for (let pass = 0; pass < STALE_ARCHIVE_PASSES; pass += 1) {
+    const picked = await env.DB.prepare(
+      `SELECT j.id FROM jobs j
+       WHERE j.source_id = ? AND j.closed_at IS NOT NULL AND j.closed_at < datetime('now', ?)
+         AND j.applied_at IS NULL AND TRIM(COALESCE(j.notes, '')) = ''
+         AND NOT EXISTS (
+           SELECT 1 FROM user_jobs uj WHERE uj.job_id = j.id AND (${WORTH_KEEPING})
+         )
+       LIMIT ?`,
+    )
+      .bind(source.id, MONTH, STALE_ARCHIVE_CHUNK)
+      .all<{ id: string }>()
+    const ids = picked.results.map((row) => row.id)
+    if (ids.length === 0) break
+    const marks = placeholders(ids.length)
+    await runBatch(env, [
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO archive_jobs (
+           id, source_id, source_provider, source_label, source_kind,
+           external_id, company, company_key, title, location, url, description,
+           posted_at, first_seen_at, last_seen_at, closed_at, changed_at,
+           dedup_key, duplicate_of, status, score, score_reason, flags, notified_at,
+           notes, applied_at, viewed_at, later_at, salary_min, salary_max, salary_currency,
+           archived_at
+         )
+         SELECT j.id, j.source_id, s.provider, s.label, s.kind,
+           j.external_id, j.company, j.company_key, j.title, j.location, j.url, j.description,
+           j.posted_at, j.first_seen_at, j.last_seen_at, j.closed_at, j.changed_at,
+           j.dedup_key, j.duplicate_of, j.status, j.score, j.score_reason, j.flags, j.notified_at,
+           j.notes, j.applied_at, j.viewed_at, j.later_at, j.salary_min, j.salary_max, j.salary_currency,
+           datetime('now')
+         FROM jobs j JOIN sources s ON s.id = j.source_id
+         WHERE j.id IN (${marks})`,
+      ).bind(...ids),
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO archive_user_jobs (
+           user_id, job_id, status, score, score_reason, flags, notes,
+           applied_at, viewed_at, later_at, notified_at, interviewed_at, cv_url, claude_comment,
+           archived_at
+         )
+         SELECT user_id, job_id, status, score, score_reason, flags, notes,
+           applied_at, viewed_at, later_at, notified_at, interviewed_at, cv_url, claude_comment,
+           datetime('now')
+         FROM user_jobs WHERE job_id IN (${marks})`,
+      ).bind(...ids),
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO archive_interview_stages (
+           id, user_id, job_id, title, happened_on, created_at, archived_at
+         )
+         SELECT id, user_id, job_id, title, happened_on, created_at, datetime('now')
+         FROM interview_stages WHERE job_id IN (${marks})`,
+      ).bind(...ids),
+      env.DB.prepare(`UPDATE jobs SET duplicate_of = NULL WHERE duplicate_of IN (${marks})`).bind(...ids),
+      env.DB.prepare(`DELETE FROM jobs WHERE id IN (${marks})`).bind(...ids),
+    ])
+    moved += ids.length
+    if (ids.length < STALE_ARCHIVE_CHUNK) break
+  }
+  return moved
 }
 
 type TwinRow = {
@@ -454,6 +534,7 @@ export async function runSourceStep(
 
     if (!more) {
       if (!suspicious) await markMissingClosed(env, source, runStart)
+      await archiveStaleSearchBoardJobs(env, source)
       await env.DB.prepare(
         `UPDATE sources SET last_count = ?, last_run_at = datetime('now') WHERE id = ?`,
       )
