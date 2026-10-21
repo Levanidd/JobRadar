@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { prefilterAndScore, upsertJobs } from "../src/ingest"
+import { markMissingClosed, prefilterAndScore, upsertJobs } from "../src/ingest"
 import type { RawJob, SourceRow } from "../src/types"
 import { TEST_USER_ID, one, rows, testEnv, type TestEnv } from "./helpers/d1"
 
@@ -505,5 +505,49 @@ describe("model usage log", () => {
     stubGemini()
     await prefilterAndScore(env, TEST_USER_ID)
     expect(await rows(env, `SELECT id FROM model_batches`)).toEqual([])
+  })
+})
+
+describe("markMissingClosed", () => {
+  const runStart = "2099-01-01 00:00:00"
+
+  async function age(url: string, firstSeen: string, lastSeen = "2026-10-21 06:00:00"): Promise<void> {
+    await env.DB.prepare(`UPDATE jobs SET first_seen_at = datetime('now', ?), last_seen_at = ? WHERE url = ?`)
+      .bind(firstSeen, lastSeen, url)
+      .run()
+  }
+
+  it("closes a young miss on a company board and keeps one on a search board", async () => {
+    const company = await addSource()
+    await upsertJobs(env, company, [job({ url: "https://acme.example/jobs/young-co" })], new Set())
+    await age("https://acme.example/jobs/young-co", "-2 days")
+
+    const board = await addSource({ kind: "company", provider: "himalayas", token: "*", label: "Himalayas" })
+    await upsertJobs(
+      env,
+      board,
+      [
+        job({ externalId: "y", url: "https://himalayas.app/jobs/young" }),
+        job({ externalId: "o", url: "https://himalayas.app/jobs/old", title: "Product Manager" }),
+        job({ externalId: "s", url: "https://himalayas.app/jobs/seen", title: "Product Lead" }),
+      ],
+      new Set(),
+    )
+    await age("https://himalayas.app/jobs/young", "-2 days")
+    await age("https://himalayas.app/jobs/old", "-40 days")
+    await age("https://himalayas.app/jobs/seen", "-40 days", "2099-06-01 00:00:00")
+
+    await markMissingClosed(env, company, runStart)
+    await markMissingClosed(env, board, runStart)
+
+    const stored = await rows<{ url: string; closed_at: string | null }>(
+      env,
+      `SELECT url, closed_at FROM jobs ORDER BY url`,
+    )
+    const byUrl = new Map(stored.map((row) => [row.url, row.closed_at]))
+    expect(byUrl.get("https://acme.example/jobs/young-co")).toBeTruthy()
+    expect(byUrl.get("https://himalayas.app/jobs/young")).toBeNull()
+    expect(byUrl.get("https://himalayas.app/jobs/old")).toBeTruthy()
+    expect(byUrl.get("https://himalayas.app/jobs/seen")).toBeNull()
   })
 })

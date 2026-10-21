@@ -97,6 +97,28 @@ export function isSuspicious(lastCount: number | null, found: number): boolean {
   return lastCount != null && lastCount > 0 && found < lastCount * 0.5
 }
 
+/**
+ * Search boards hand back a fresh window, not the live set. A miss there is
+ * the page limit, so a posting stays open for a month from the day we first
+ * saw it. A company board is the whole listing, and a miss there is a takedown.
+ */
+const BOARD_OPEN_GRACE = "-1 month"
+
+export function boardKeepsYoungMisses(provider: string): boolean {
+  return getAdapter(provider).kind === "query"
+}
+
+export async function markMissingClosed(env: Bindings, source: SourceRow, runStart: string): Promise<void> {
+  const grace = boardKeepsYoungMisses(source.provider) ? 1 : 0
+  await env.DB.prepare(
+    `UPDATE jobs SET closed_at = datetime('now')
+     WHERE source_id = ? AND closed_at IS NULL AND last_seen_at < ?
+       AND (? = 0 OR first_seen_at < datetime('now', ?))`,
+  )
+    .bind(source.id, runStart, grace, BOARD_OPEN_GRACE)
+    .run()
+}
+
 type TwinRow = {
   id: string
   kind: string
@@ -431,14 +453,7 @@ export async function runSourceStep(
     const suspicious = isSuspicious(source.last_count, raw.length)
 
     if (!more) {
-      if (!suspicious) {
-        await env.DB.prepare(
-          `UPDATE jobs SET closed_at = datetime('now')
-           WHERE source_id = ? AND closed_at IS NULL AND last_seen_at < ?`,
-        )
-          .bind(source.id, runStart)
-          .run()
-      }
+      if (!suspicious) await markMissingClosed(env, source, runStart)
       await env.DB.prepare(
         `UPDATE sources SET last_count = ?, last_run_at = datetime('now') WHERE id = ?`,
       )
