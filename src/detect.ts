@@ -112,8 +112,10 @@ const ATS_MARKERS: {
   { re: /job-boards\.(?:eu\.)?greenhouse\.io\/(?!embed\b)([a-z0-9_-]+)/i, provider: "greenhouse", group: 1 },
   { re: /boards\.(?:eu\.)?greenhouse\.io\/(?!embed\b)([a-z0-9_-]+)/i, provider: "greenhouse", group: 1 },
   { re: /jobs\.lever\.co\/([a-z0-9_-]+)/i, provider: "lever", group: 1 },
-  { re: /api\.ashbyhq\.com\/posting-api\/job-board\/([a-z0-9_-]+)/i, provider: "ashby", group: 1 },
-  { re: /jobs\.ashbyhq\.com\/([a-z0-9_-]+)/i, provider: "ashby", group: 1 },
+  // The board name is the first path segment, and Ashby allows a dot in it
+  // (`taxfix.com`, `checkout.com`). Stopping at the dot fetches a board that 404s.
+  { re: /api\.ashbyhq\.com\/posting-api\/job-board\/([a-z0-9_-]+(?:\.[a-z0-9_-]+)*)/i, provider: "ashby", group: 1 },
+  { re: /jobs\.ashbyhq\.com\/([a-z0-9_-]+(?:\.[a-z0-9_-]+)*)/i, provider: "ashby", group: 1 },
   { re: /([a-z0-9-]+)\.jobs\.personio\.(?:de|com)/i, provider: "personio", group: 1 },
   { re: /apply\.workable\.com\/([a-z0-9_-]+)/i, provider: "workable", group: 1 },
   { re: /careers\.smartrecruiters\.com\/([a-z0-9_-]+)/i, provider: "smartrecruiters", group: 1 },

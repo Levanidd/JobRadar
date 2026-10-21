@@ -312,6 +312,10 @@ describe("adapter parsers", () => {
       provider: "ashby",
       token: "linear",
     })
+    expect(detectToken(new URL("https://jobs.ashbyhq.com/taxfix.com/form/talent-pool"))).toEqual({
+      provider: "ashby",
+      token: "taxfix.com",
+    })
     expect(detectToken(new URL("https://acme.jobs.personio.de/job/1"))).toEqual({
       provider: "personio",
       token: "acme",
@@ -452,6 +456,12 @@ describe("new career-ops boards", () => {
       provider: "lever",
       token: "acme",
     })
+    expect(
+      matchMarkers(
+        `<a href="https://jobs.ashbyhq.com/taxfix.com/form/talent-pool-careers-page">Talent pool</a>`,
+        "https://taxfix.de/en/job-openings/",
+      ),
+    ).toEqual({ provider: "ashby", token: "taxfix.com" })
   })
 
   it("reads a branded SuccessFactors board off the runtime script", () => {
