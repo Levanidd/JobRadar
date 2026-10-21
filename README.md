@@ -1,9 +1,47 @@
 # JobRadar
 
-**A shared job catalog with a private verdict for each person.** JobRadar pulls openings from company ATS boards and query sources, dedupes them, and scores each one against that person's profile. Two people can look at the same posting and keep different scores, statuses and applications. A React admin is served from the same Worker.
+**A job search you can run like a product, not like a spreadsheet.** JobRadar watches company career boards, keeps one shared catalog, and gives each person their own score, pipeline and notes. The ranking rules are a text profile they can edit. The model behind the score can be swapped only after a lab run has compared it with the one already in production.
+
+Built end to end by [Leonid Kurdyukov](https://github.com/Levanidd): product scope, data model, ingest, scoring, the admin, and the model lab. It is the system he uses for his own search in Berlin, not a demo with fixture data.
 
 - **Live:** https://jobradar.kurdyukov-leo-ger.workers.dev
+- **Code:** https://github.com/Levanidd/JobRadar
 - **Spec:** [`docs/SPEC.md`](docs/SPEC.md)
+
+## The problem
+
+A serious search is a pipeline. Which companies are worth watching, which titles even count, what "good" means for this person, and what happened after the click. Boards stop at the list. A chat can rank one posting and then forget it. Neither keeps a shared catalog and a private verdict, and neither lets you change the scoring model without guessing whether the new one is actually better.
+
+JobRadar is that missing layer.
+
+- **One catalog.** Company ATS boards and search sources are ingested, deduped and kept open or closed in one place. About 70 adapters, from Greenhouse, Lever, Ashby and Workday to Arbeitsagentur and a handful of company-specific boards.
+- **A private verdict.** Score, status, notes, CV link and interview stages belong to the person. Two people can apply to the same posting and never see each other's pipeline.
+- **Rules you can read.** Keep/drop tags and a company blacklist run in code, before any model call. Everything else the model is allowed to care about is the person's own profile text.
+- **A way to change the model.** The lab replays postings the current scorer already judged, across several models and several repeats, and shows cost, stability and disagreement. Production data is not touched.
+
+## What makes it different
+
+| | JobRadar | A job board | Asking a chatbot |
+|---|---|---|---|
+| Live catalog, deduped across sources | Yes | One site, or a keyword search | No memory of the market |
+| Score and pipeline per person | Yes, on the same posting | A bookmark | A chat transcript |
+| Who decides "worth a ping" | The person's profile, editable | The board's ranking | Whatever was in the last prompt |
+| Bad titles never reach the model | Prefilter in code | You filter by hand | The model reads everything |
+| Change the model on purpose | Lab: same inputs, several models, a cost | No | Try another chat |
+| Two people, one search | Shared boards, private applications | Separate accounts | Not a product |
+
+## What to look at
+
+Ten minutes in the code, in the order a review would actually go.
+
+| Question | Where |
+|---|---|
+| Where does a posting stop being shared and become mine? | `migrations/0018_users.sql` — `jobs` vs `user_jobs` |
+| What never gets sent to the model? | `prefilterAndScore` in `src/ingest.ts` |
+| Where do the scoring rules live? | `scoringSystemPrompt` in `src/scoring.ts` |
+| Why can the tab be closed mid-run? | `src/cycle.ts` — hops plus a cron resume |
+| Why does a careers homepage often fail, and the ATS URL work? | `src/detect.ts` |
+| How do you compare models without corrupting production? | `src/lab.ts` — snapshot the prompt, write only `lab_*` |
 
 ## How it works
 
