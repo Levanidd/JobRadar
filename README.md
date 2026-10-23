@@ -8,6 +8,20 @@ Built end to end by [Leonid Kurdyukov](https://github.com/Levanidd): product sco
 - **Code:** https://github.com/Levanidd/JobRadar
 - **Spec:** [`docs/SPEC.md`](docs/SPEC.md)
 
+## Screens
+
+Sources. A careers link is checked for an ATS the adapter can actually fetch. The table is the shared list of boards.
+
+![Sources: add a company and the watchlist](docs/screenshots/sources.jpg)
+
+Lab. A run replays postings the current scorer already judged, across several models and several repeats. Production scores stay as they are.
+
+![Model lab: two finished runs](docs/screenshots/lab.jpg)
+
+One run. Stability, disagreement with the current score, latency and cost, then the matrix of repeats.
+
+![Lab run: five models on the same ten postings](docs/screenshots/lab-run.jpg)
+
 ## The problem
 
 A serious search is a pipeline. Which companies are worth watching, which titles even count, what "good" means for this person, and what happened after the click. Boards stop at the list. A chat can rank one posting and then forget it. Neither keeps a shared catalog and a private verdict, and neither lets you change the scoring model without guessing whether the new one is actually better.
