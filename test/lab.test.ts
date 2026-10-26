@@ -189,6 +189,11 @@ async function seedPool(entries: Seed[] = [...POOL, ...NOISE]): Promise<string[]
         entry.duplicateOf ?? null,
       )
       .run()
+    const description =
+      entry.description === undefined ? `Описание вакансии ${index}. baseline=${entry.score ?? 0}` : entry.description
+    if (description) {
+      await env.DB.prepare(`INSERT INTO job_texts (job_id, description) VALUES (?, ?)`).bind(id, description).run()
+    }
     await env.DB.prepare(
       `INSERT INTO user_jobs (user_id, job_id, score, score_reason, flags, status) VALUES (1, ?, ?, ?, ?, ?)`,
     )
