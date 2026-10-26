@@ -1,4 +1,4 @@
-import { placeholders, runBatch, selectIn } from "./db"
+import { runBatch, selectIn } from "./db"
 import { clipDescription } from "./prefilter"
 import type { Bindings } from "./types"
 
@@ -45,7 +45,9 @@ export function saveJobTextIfEmpty(env: Bindings, jobId: string, description: st
 }
 
 export function deleteJobTexts(env: Bindings, ids: string[]) {
-  return env.DB.prepare(`DELETE FROM job_texts WHERE job_id IN (${placeholders(ids.length)})`).bind(...ids)
+  return env.DB.prepare(`DELETE FROM job_texts WHERE job_id IN (SELECT value FROM json_each(?))`).bind(
+    JSON.stringify(ids),
+  )
 }
 
 /**
@@ -104,10 +106,10 @@ export async function backfillJobTexts(
 
   await env.DB.prepare(
     `UPDATE jobs SET description = NULL
-     WHERE rowid IN (${placeholders(rows.length)})
+     WHERE rowid IN (SELECT value FROM json_each(?))
        AND id IN (SELECT job_id FROM job_texts WHERE description IS NOT NULL)`,
   )
-    .bind(...rows.map((row) => row.rid))
+    .bind(JSON.stringify(rows.map((row) => row.rid)))
     .run()
 
   return { after: rows[rows.length - 1]!.rid, moved: rows.length }

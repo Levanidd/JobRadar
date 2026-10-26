@@ -118,6 +118,8 @@ export type JobFilters = {
   applied?: "yes" | "no"
   sort?: JobSort
   dir?: "asc" | "desc"
+  limit?: number
+  offset?: number
 }
 
 function jobQuery(filters: JobFilters): string {
@@ -134,6 +136,8 @@ function jobQuery(filters: JobFilters): string {
   if (filters.applied) params.set("applied", filters.applied)
   if (filters.sort) params.set("sort", filters.sort)
   if (filters.dir) params.set("dir", filters.dir)
+  if (filters.limit) params.set("limit", String(filters.limit))
+  if (filters.offset) params.set("offset", String(filters.offset))
   const query = params.toString()
   return query ? `?${query}` : ""
 }
@@ -209,7 +213,7 @@ export const api = {
     return post(`/users/${id}/rescore`)
   },
 
-  jobs(filters: JobFilters): Promise<{ jobs: Job[] }> {
+  jobs(filters: JobFilters): Promise<{ jobs: Job[]; has_more: boolean; next_offset: number }> {
     return request(`/jobs${jobQuery(filters)}`)
   },
 

@@ -2,7 +2,6 @@ import { Hono } from "hono"
 
 import { adapters } from "../adapters"
 import { currentUser, masterGuard } from "../auth"
-import { placeholders } from "../db"
 import { ensureExploreSources, listExploreBoards } from "../explore"
 import { addDiscovered, trackedCompanyKeys } from "../ingest"
 import { blockedCompanyKeysForUser } from "../settings"
@@ -80,7 +79,7 @@ discovery.get("/api/explore", async (c) => {
        JOIN sources s ON s.id = j.source_id
        LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
        WHERE j.closed_at IS NULL AND s.kind = 'query' AND s.deleted_at IS NULL
-         AND s.provider IN (${placeholders(providers.length)})
+         AND s.provider IN (SELECT value FROM json_each(?))
          AND j.company_key IS NOT NULL AND j.company_key != ''
      )
      SELECT company_key,
@@ -94,7 +93,7 @@ discovery.get("/api/explore", async (c) => {
      ORDER BY best_score DESC NULLS LAST, jobs DESC
      LIMIT 800`,
   )
-    .bind(currentUser(c).id, ...providers)
+    .bind(currentUser(c).id, JSON.stringify(providers))
     .all<{ company_key: string }>()
 
   // Explore is a suggestion list: an employer we already follow or already

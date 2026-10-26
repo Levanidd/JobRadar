@@ -88,10 +88,10 @@ export async function resetAndScore(
     const ids = page.results.map((row) => row.id)
     await env.DB.prepare(
       `UPDATE user_jobs SET score = NULL, score_reason = NULL, flags = NULL
-       WHERE user_id = ? AND job_id IN (${ids.map(() => "?").join(", ")})
+       WHERE user_id = ? AND job_id IN (SELECT value FROM json_each(?))
          AND COALESCE(status, 'new') NOT IN ('ignored', 'rejected', 'off_profile')`,
     )
-      .bind(userId, ...ids)
+      .bind(userId, JSON.stringify(ids))
       .run()
     const last = page.results[page.results.length - 1]
     seen = last.first_seen_at

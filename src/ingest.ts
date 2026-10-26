@@ -935,10 +935,10 @@ export async function prefilterAndScore(
     )
     await env.DB.prepare(
       `UPDATE user_jobs SET scoring_claimed_at = datetime('now'), scoring_claim_id = ?
-       WHERE user_id = ? AND job_id IN (${placeholders(wanted.length)}) AND score IS NULL
+       WHERE user_id = ? AND job_id IN (SELECT value FROM json_each(?)) AND score IS NULL
          AND (scoring_claimed_at IS NULL OR scoring_claimed_at < datetime('now', ?))`,
     )
-      .bind(claim, userId, ...wanted.map((item) => item.id), CLAIM_TTL)
+      .bind(claim, userId, JSON.stringify(wanted.map((item) => item.id)), CLAIM_TTL)
       .run()
     const held = await env.DB.prepare(
       `SELECT job_id FROM user_jobs WHERE user_id = ? AND scoring_claim_id = ?`,

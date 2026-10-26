@@ -35,7 +35,7 @@ const JOB_ORDER: Record<string, string> = {
 export function jobOrder(c: Ctx): string {
   const expr = JOB_ORDER[c.req.query("sort") ?? ""] ?? JOB_ORDER.score
   const dir = c.req.query("dir") === "asc" ? "ASC" : "DESC"
-  return `${expr} ${dir} NULLS LAST, j.first_seen_at DESC`
+  return `${expr} ${dir} NULLS LAST, j.first_seen_at DESC, j.id`
 }
 
 export async function jobFilters(c: Ctx, withCompanies: boolean): Promise<Where> {
@@ -72,8 +72,8 @@ export async function jobFilters(c: Ctx, withCompanies: boolean): Promise<Where>
     .map((key) => key.trim())
     .filter(Boolean)
   if (withCompanies && companies.length > 0) {
-    clauses.push(`j.company_key IN (${companies.map(() => "?").join(", ")})`)
-    binds.push(...companies)
+    clauses.push(`j.company_key IN (SELECT value FROM json_each(?))`)
+    binds.push(JSON.stringify(companies))
   }
 
   const sourceId = Number(c.req.query("source_id") ?? 0)
