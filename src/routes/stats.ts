@@ -122,6 +122,9 @@ stats.get("/api/stats", async (c) => {
   const where = `${blocked.sql} AND j.duplicate_of IS NULL`
   const binds = [userId, ...blocked.binds]
   const join = `FROM jobs j INDEXED BY idx_jobs_primary LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?`
+  // Applications are few. Start from that partial index and look each job up
+  // by primary key, instead of walking every primary row in jobs.
+  const applications = `FROM user_jobs uj CROSS JOIN jobs j ON j.id = uj.job_id`
 
   // A period narrows each number to the events that fall inside it, and every
   // number has its own event: a job counts as found when we first saw it, as
@@ -157,13 +160,13 @@ stats.get("/api/stats", async (c) => {
          SUM(CASE WHEN ${HAD_INTERVIEW} THEN 1 ELSE 0 END) AS interview,
          SUM(CASE WHEN uj.status = 'rejected' AND uj.interviewed_at IS NULL THEN 1 ELSE 0 END) AS rejected,
          SUM(CASE WHEN NOT ${HAD_INTERVIEW} AND uj.status <> 'rejected' THEN 1 ELSE 0 END) AS waiting
-       ${join}
-       WHERE ${acted("applied_at")} AND ${where}`,
+       ${applications}
+       WHERE uj.user_id = ? AND ${acted("applied_at")} AND ${where}`,
     ).bind(...appliedBinds),
     c.env.DB.prepare(
       `SELECT j.company_key, MIN(j.company) AS company, COUNT(*) AS n
-       ${join}
-       WHERE ${acted("applied_at")} AND ${where}
+       ${applications}
+       WHERE uj.user_id = ? AND ${acted("applied_at")} AND ${where}
        GROUP BY j.company_key
        ORDER BY n DESC, company COLLATE NOCASE
        LIMIT 8`,
@@ -173,8 +176,8 @@ stats.get("/api/stats", async (c) => {
          date(uj.applied_at, '-' || ((CAST(strftime('%w', uj.applied_at) AS INTEGER) + 6) % 7) || ' days') AS start,
          ${PIPELINE_BREAKDOWN},
          COUNT(*) AS total
-       ${join}
-       WHERE uj.applied_at IS NOT NULL AND ${where}
+       ${applications}
+       WHERE uj.user_id = ? AND uj.applied_at IS NOT NULL AND ${where}
        GROUP BY start
        ORDER BY start`,
     ).bind(...binds),
@@ -183,8 +186,8 @@ stats.get("/api/stats", async (c) => {
          strftime('%Y-%m', uj.applied_at) AS start,
          ${PIPELINE_BREAKDOWN},
          COUNT(*) AS total
-       ${join}
-       WHERE uj.applied_at IS NOT NULL AND ${where}
+       ${applications}
+       WHERE uj.user_id = ? AND uj.applied_at IS NOT NULL AND ${where}
        GROUP BY start
        ORDER BY start`,
     ).bind(...binds),
