@@ -5,6 +5,7 @@ import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
 import { pick } from "./locale"
 import { loadScoreQuota, QuotaError, quotaMessage } from "./quota"
+import { deleteJobTexts, JOB_DESCRIPTION, JOB_TEXT_JOIN, NO_TEXT, saveJobText, saveJobTextIfEmpty } from "./job-text"
 import { clipDescription, passesPrefilter } from "./prefilter"
 import { toSalary } from "./salary"
 import { scoreInBatches, scoreJobs, type ScoreInput } from "./scoring"
@@ -203,12 +204,13 @@ export async function archiveStaleSearchBoardJobs(env: Bindings, source: SourceR
            archived_at
          )
          SELECT j.id, j.source_id, s.provider, s.label, s.kind,
-           j.external_id, j.company, j.company_key, j.title, j.location, j.url, j.description,
+           j.external_id, j.company, j.company_key, j.title, j.location, j.url, ${JOB_DESCRIPTION},
            j.posted_at, j.first_seen_at, j.last_seen_at, j.closed_at, j.changed_at,
            j.dedup_key, j.duplicate_of, j.status, j.score, j.score_reason, j.flags, j.notified_at,
            j.notes, j.applied_at, j.viewed_at, j.later_at, j.salary_min, j.salary_max, j.salary_currency,
            datetime('now')
          FROM jobs j JOIN sources s ON s.id = j.source_id
+         ${JOB_TEXT_JOIN}
          WHERE j.id IN (${marks})`,
       ).bind(...ids),
       env.DB.prepare(
@@ -230,6 +232,7 @@ export async function archiveStaleSearchBoardJobs(env: Bindings, source: SourceR
          FROM interview_stages WHERE job_id IN (${marks})`,
       ).bind(...ids),
       ...heirs,
+      deleteJobTexts(env, ids),
       env.DB.prepare(`DELETE FROM jobs WHERE id IN (${marks})`).bind(...ids),
     ])
     moved += ids.length
@@ -379,6 +382,24 @@ export async function upsertJobs(
     )
   }
 
+  const storedText = new Map<string, string>()
+  const withText = wanted.flatMap((row) => {
+    const text = clipDescription(row.job.description)
+    return text ? [row.id] : []
+  })
+  if (withText.length > 0) {
+    // Only rows that arrived with a body. Comparing here, instead of inside the
+    // upsert, keeps changed_at the same as when the body still lived on jobs.
+    const known = await selectIn<{ id: string; description: string | null }>(
+      env,
+      (list) => `SELECT j.id, ${JOB_DESCRIPTION} AS description
+         FROM jobs j ${JOB_TEXT_JOIN}
+         WHERE j.id IN (${list})`,
+      withText,
+    )
+    for (const row of known) if (row.description) storedText.set(row.id, row.description)
+  }
+
   const writes: D1PreparedStatement[] = []
   /** Openings already claimed by an earlier row of this same slice. */
   const claimed = new Set<string>()
@@ -412,10 +433,11 @@ export async function upsertJobs(
       present.add(id)
     }
     const description = clipDescription(job.description) ?? null
+    const textChanged = description !== null && description !== (storedText.get(id) ?? "")
     writes.push(
       env.DB.prepare(
-        `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, location, url, description, posted_at, salary_min, salary_max, salary_currency, dedup_key, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
+        `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, location, url, posted_at, salary_min, salary_max, salary_currency, dedup_key, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
          ON CONFLICT(id) DO UPDATE SET
            last_seen_at = datetime('now'),
            title = excluded.title,
@@ -423,14 +445,13 @@ export async function upsertJobs(
            dedup_key = excluded.dedup_key,
            closed_at = NULL,
            posted_at = COALESCE(excluded.posted_at, jobs.posted_at),
-           description = COALESCE(excluded.description, jobs.description),
            salary_min = COALESCE(excluded.salary_min, jobs.salary_min),
            salary_max = COALESCE(excluded.salary_max, jobs.salary_max),
            salary_currency = COALESCE(excluded.salary_currency, jobs.salary_currency),
            changed_at = CASE
              WHEN excluded.title IS NOT jobs.title
                OR IFNULL(excluded.location, '') IS NOT IFNULL(jobs.location, '')
-               OR (excluded.description IS NOT NULL AND excluded.description IS NOT IFNULL(jobs.description, ''))
+               OR ? = 1
                OR (excluded.posted_at IS NOT NULL AND excluded.posted_at IS NOT IFNULL(jobs.posted_at, ''))
                OR IFNULL(excluded.salary_min, -1) IS NOT IFNULL(jobs.salary_min, -1)
                OR IFNULL(excluded.salary_max, -1) IS NOT IFNULL(jobs.salary_max, -1)
@@ -446,15 +467,16 @@ export async function upsertJobs(
         job.title,
         job.location ?? null,
         job.url,
-        description,
         job.postedAt ?? null,
         job.salary?.min ?? null,
         job.salary?.max ?? null,
         job.salary?.currency || null,
         opening,
         duplicateOf,
+        textChanged ? 1 : 0,
       ),
     )
+    if (description) writes.push(saveJobText(env, id, description))
 
     if (inherit) {
       writes.push(inheritFirstSeen(env, inherit.first_seen_at, id))
@@ -463,6 +485,7 @@ export async function upsertJobs(
       writes.push(
         env.DB.prepare(`UPDATE jobs SET duplicate_of = ? WHERE duplicate_of = ?`).bind(id, inherit.id),
       )
+      writes.push(deleteJobTexts(env, [inherit.id]))
       writes.push(env.DB.prepare(`DELETE FROM jobs WHERE id = ?`).bind(inherit.id))
     }
 
@@ -762,9 +785,7 @@ async function fillLateDescriptions(
     for (const item of fetched) {
       if (!item.text) continue
       found.set(item.id, item.text)
-      writes.push(
-        env.DB.prepare(`UPDATE jobs SET description = ? WHERE id = ? AND description IS NULL`).bind(item.text, item.id),
-      )
+      writes.push(saveJobTextIfEmpty(env, item.id, item.text))
     }
   }
   await runBatch(env, writes)
@@ -786,8 +807,9 @@ export async function prefilterAndScore(
 
   const open = await env.DB.prepare(
     `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, j.dedup_key,
-            typeof(j.description) = 'null' AS no_text
+            ${NO_TEXT} AS no_text
      FROM jobs j INDEXED BY idx_jobs_live
+     ${JOB_TEXT_JOIN}
      LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.closed_at IS NULL AND j.duplicate_of IS NULL AND uj.score IS NULL
        AND COALESCE(uj.status, 'new') NOT IN ('ignored', 'rejected', 'off_profile')
@@ -860,7 +882,9 @@ export async function prefilterAndScore(
   if (batch.length > 0) {
     const bodies = await selectIn<{ id: string; url: string; description: string | null }>(
       env,
-      (list) => `SELECT id, url, description FROM jobs WHERE id IN (${list})`,
+      (list) => `SELECT j.id, j.url, ${JOB_DESCRIPTION} AS description
+         FROM jobs j ${JOB_TEXT_JOIN}
+         WHERE j.id IN (${list})`,
       batch.map((item) => item.id),
     )
     const filled = await fillLateDescriptions(env, bodies)
@@ -1016,9 +1040,10 @@ export async function scoreJobsByIds(env: Bindings, ids: string[], userId: numbe
   if (unique.length === 0) return []
 
   const rows = await env.DB.prepare(
-    `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, j.description, j.closed_at,
+    `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, ${JOB_DESCRIPTION} AS description, j.closed_at,
             COALESCE(uj.status, 'new') AS status
      FROM jobs j
+     ${JOB_TEXT_JOIN}
      LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.id IN (${unique.map(() => "?").join(", ")}) AND j.closed_at IS NULL`,
   )
@@ -1192,11 +1217,11 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
 
   await env.DB.prepare(
     `INSERT INTO jobs (
-       id, source_id, external_id, company, company_key, title, location, url, description,
+       id, source_id, external_id, company, company_key, title, location, url,
        posted_at, salary_min, salary_max, salary_currency, dedup_key,
        first_seen_at, last_seen_at, changed_at, closed_at, status
      ) VALUES (
-       ?, ?, ?, ?, ?, ?, ?, ?, ?,
+       ?, ?, ?, ?, ?, ?, ?, ?,
        NULL, ?, ?, ?, ?,
        datetime('now'), datetime('now'), datetime('now'), NULL, 'new'
      )
@@ -1205,7 +1230,6 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
        company = excluded.company,
        company_key = excluded.company_key,
        location = excluded.location,
-       description = COALESCE(excluded.description, jobs.description),
        salary_min = COALESCE(excluded.salary_min, jobs.salary_min),
        salary_max = COALESCE(excluded.salary_max, jobs.salary_max),
        salary_currency = COALESCE(excluded.salary_currency, jobs.salary_currency),
@@ -1223,13 +1247,14 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
       title,
       input.location?.trim() || null,
       url,
-      description,
       salary?.min ?? null,
       salary?.max ?? null,
       salary?.currency || null,
       opening,
     )
     .run()
+
+  if (description) await saveJobText(env, id, description).run()
 
   await env.DB.prepare(
     `INSERT INTO user_jobs (user_id, job_id, status, notes, applied_at, interviewed_at)
@@ -1248,9 +1273,10 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
             j.posted_at, j.first_seen_at, j.last_seen_at, j.changed_at,
             j.salary_min, j.salary_max, j.salary_currency,
             uj.score, uj.score_reason, uj.flags, COALESCE(uj.status, 'new') AS status,
-            uj.applied_at, uj.viewed_at, uj.later_at, uj.interviewed_at, uj.notes, j.description,
+            uj.applied_at, uj.viewed_at, uj.later_at, uj.interviewed_at, uj.notes, ${JOB_DESCRIPTION} AS description,
             s.tier, s.label as source_label
      FROM jobs j
+     ${JOB_TEXT_JOIN}
      JOIN sources s ON s.id = j.source_id
      LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.id = ?`,

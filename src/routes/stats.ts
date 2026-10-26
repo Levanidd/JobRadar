@@ -121,7 +121,8 @@ stats.get("/api/stats", async (c) => {
   const blocked = await excludeBlockedCompaniesForUser(c.env, userId, "j.company_key")
   const where = `${blocked.sql} AND j.duplicate_of IS NULL`
   const binds = [userId, ...blocked.binds]
-  const join = `FROM jobs j INDEXED BY idx_jobs_primary LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?`
+  const join = `FROM jobs j INDEXED BY idx_jobs_stat_cover
+    LEFT JOIN user_jobs uj INDEXED BY idx_user_jobs_stat ON uj.job_id = j.id AND uj.user_id = ?`
   // Applications are few. Start from that partial index and look each job up
   // by primary key, instead of walking every primary row in jobs.
   const applications = `FROM user_jobs uj CROSS JOIN jobs j ON j.id = uj.job_id`

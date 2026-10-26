@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { archiveStaleSearchBoardJobs, markMissingClosed, prefilterAndScore, upsertJobs } from "../src/ingest"
+import { backfillJobTexts } from "../src/job-text"
 import type { RawJob, SourceRow } from "../src/types"
 import { TEST_USER_ID, one, rows, testEnv, type TestEnv } from "./helpers/d1"
 
@@ -95,9 +96,35 @@ describe("upsertJobs", () => {
     const source = await addSource()
     await upsertJobs(env, source, [job()], new Set())
     await upsertJobs(env, source, [job({ description: undefined })], new Set())
-    expect(await one(env, `SELECT description FROM jobs`)).toMatchObject({
+    expect(await one(env, `SELECT description FROM job_texts`)).toMatchObject({
       description: "Build payments products.",
     })
+  })
+
+  it("moves a stored body into job_texts and leaves jobs.description empty", async () => {
+    const source = await addSource()
+    const id = "job-with-body"
+    await env.DB.prepare(
+      `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, url, description)
+       VALUES (?, ?, '1', 'Acme', 'acme', 'Senior Product Manager', 'https://acme.example/jobs/1', ?)`,
+    )
+      .bind(id, source.id, "Build payments products.")
+      .run()
+
+    const first = await backfillJobTexts(env, 0, 50)
+    expect(first.moved).toBe(1)
+    expect(first.after).toBeGreaterThan(0)
+    expect(await one(env, `SELECT description FROM job_texts WHERE job_id = ?`, id)).toMatchObject({
+      description: "Build payments products.",
+    })
+    expect(await one(env, `SELECT description FROM jobs WHERE id = ?`, id)).toMatchObject({ description: null })
+    expect(await backfillJobTexts(env, first.after, 50)).toEqual({ after: 0, moved: 0 })
+    expect(
+      await one<{ n: number }>(
+        env,
+        `SELECT COUNT(*) AS n FROM job_texts t LEFT JOIN jobs j ON j.id = t.job_id WHERE j.id IS NULL`,
+      ),
+    ).toMatchObject({ n: 0 })
   })
 
   it("records unwatched employers seen on a query board", async () => {
@@ -356,7 +383,7 @@ describe("prefilterAndScore", () => {
       score: 0,
       score_reason: "prefilter",
     })
-    expect(await one(env, `SELECT description FROM jobs`)).toMatchObject({
+    expect(await one(env, `SELECT description FROM job_texts`)).toMatchObject({
       description: "Build payments products.",
     })
   })
@@ -623,10 +650,12 @@ describe("archiveStaleSearchBoardJobs", () => {
       "https://board.example/fresh",
     ])
     expect(await rows(env, `SELECT job_id FROM user_jobs WHERE job_id = ?`, oldId)).toEqual([])
-    expect(await one(env, `SELECT url, source_provider FROM archive_jobs`)).toMatchObject({
+    expect(await one(env, `SELECT url, source_provider, description FROM archive_jobs`)).toMatchObject({
       url: "https://board.example/old",
       source_provider: "arbeitnow",
+      description: "Build payments products.",
     })
+    expect(await rows(env, `SELECT job_id FROM job_texts WHERE job_id = ?`, oldId)).toEqual([])
     expect(await one(env, `SELECT job_id, status, score FROM archive_user_jobs`)).toMatchObject({
       job_id: oldId,
       status: "off_profile",

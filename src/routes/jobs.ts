@@ -1,8 +1,10 @@
 import { Hono } from "hono"
 
-import { currentUser } from "../auth"
+import { currentUser, masterGuard } from "../auth"
 import { message } from "../errors"
+import { placeholders } from "../db"
 import { createManualJob, scoreJobsByIds, scoreOneJob, setPrimaryListing } from "../ingest"
+import { backfillJobTexts, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "../job-text"
 import { QuotaError } from "../quota"
 import type { AppEnv } from "../types"
 import { JOB_COLUMNS, JOB_SOURCE, appliedFilters, jobFilters, jobOrder } from "./job-query"
@@ -38,8 +40,9 @@ type DuplicateListing = {
 
 async function loadJobDetail(env: AppEnv["Bindings"], userId: number, id: string) {
   const row = await env.DB.prepare(
-    `SELECT ${JOB_COLUMNS}, j.description, uj.notes, uj.cv_url, uj.claude_comment, s.tier, s.label as source_label
+    `SELECT ${JOB_COLUMNS}, ${JOB_DESCRIPTION} AS description, uj.notes, uj.cv_url, uj.claude_comment, s.tier, s.label as source_label
      ${JOB_SOURCE}
+     ${JOB_TEXT_JOIN}
      WHERE j.id = ?`,
   )
     .bind(userId, id)
@@ -156,17 +159,49 @@ function listedJobs(sourceScoped: boolean): string {
 
 jobs.get("/api/jobs", async (c) => {
   const userId = currentUser(c).id
+  const sourceScoped = Boolean(Number(c.req.query("source_id") ?? 0))
   const { clauses, binds } = await jobFilters(c, true)
-  const rows = await c.env.DB.prepare(
-    `SELECT ${JOB_COLUMNS}, s.tier, s.label as source_label
-     ${listedJobs(Boolean(Number(c.req.query("source_id") ?? 0)))}
+  const jobsHint = sourceScoped ? "" : " INDEXED BY idx_jobs_list_cover"
+  // The source table is only needed when the tier filter reads it. The default
+  // list orders by score, which lives on user_jobs.
+  const sourceJoin = c.req.query("tier") ? "JOIN sources s ON s.id = j.source_id" : ""
+  const ordered = await c.env.DB.prepare(
+    `SELECT j.id
+     FROM jobs j${jobsHint}
+     ${sourceJoin}
+     LEFT JOIN user_jobs uj INDEXED BY idx_user_jobs_list ON uj.job_id = j.id AND uj.user_id = ?
      WHERE ${clauses}
      ORDER BY ${jobOrder(c)}
      LIMIT 500`,
   )
     .bind(userId, ...binds)
-    .all()
-  return c.json({ jobs: rows.results })
+    .all<{ id: string }>()
+  const ids = ordered.results.map((row) => row.id)
+  if (ids.length === 0) return c.json({ jobs: [] })
+
+  const loaded = await c.env.DB.prepare(
+    `SELECT ${JOB_COLUMNS}, s.tier, s.label as source_label
+     FROM jobs j
+     JOIN sources s ON s.id = j.source_id
+     LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+     WHERE j.id IN (${placeholders(ids.length)})`,
+  )
+    .bind(userId, ...ids)
+    .all<{ id: string }>()
+  const byId = new Map(loaded.results.map((row) => [row.id, row]))
+  return c.json({ jobs: ids.flatMap((id) => { const row = byId.get(id); return row ? [row] : [] }) })
+})
+
+/** Moves posting bodies out of jobs. Master only. Call again with the returned rowid until it is 0. */
+jobs.post("/api/jobs/backfill-texts", async (c) => {
+  const denied = masterGuard(c)
+  if (denied) return denied
+  const after = Number(c.req.query("after") ?? 0)
+  const limit = Number(c.req.query("limit") ?? 50)
+  if (!Number.isFinite(after) || after < 0) return c.json({ error: "after must be a rowid" }, 400)
+  if (!Number.isFinite(limit) || limit < 1) return c.json({ error: "limit must be at least 1" }, 400)
+  const result = await backfillJobTexts(c.env, after, limit)
+  return c.json(result)
 })
 
 jobs.get("/api/jobs/companies", async (c) => {

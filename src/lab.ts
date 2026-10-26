@@ -15,6 +15,7 @@ import {
   type SampleMode,
   type Stratum,
 } from "./lab-sample"
+import { HAS_TEXT, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "./job-text"
 import { clipDescription } from "./prefilter"
 import {
   ScoringError,
@@ -309,8 +310,9 @@ const poolCache = new WeakMap<object, Map<number, { at: number; pool: PoolEntry[
  */
 async function readPool(env: Bindings, userId: number): Promise<PoolEntry[]> {
   const rows = await env.DB.prepare(
-    `SELECT uj.job_id, uj.score, uj.status, j.url, typeof(j.description) = 'text' AS has_text
+    `SELECT uj.job_id, uj.score, uj.status, j.url, ${HAS_TEXT} AS has_text
      FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
+     ${JOB_TEXT_JOIN}
      WHERE uj.user_id = ? AND uj.status IN (${placeholders(POOL_STATUSES.length)})
        AND uj.score IS NOT NULL AND COALESCE(uj.score_reason, '') <> 'prefilter'
        AND j.duplicate_of IS NULL
@@ -353,9 +355,10 @@ type JobSnapshot = Omit<LabJob, "position"> & { description: string }
 async function loadSourceRows(env: Bindings, userId: number, ids: string[]): Promise<SourceRow[]> {
   if (ids.length === 0) return []
   const rows = await env.DB.prepare(
-    `SELECT j.id, j.title, j.company, j.location, j.url, j.description,
+    `SELECT j.id, j.title, j.company, j.location, j.url, ${JOB_DESCRIPTION} AS description,
        uj.score, uj.score_reason, uj.flags, uj.status
-     FROM jobs j JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+     FROM jobs j ${JOB_TEXT_JOIN}
+     JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.id IN (${placeholders(ids.length)})`,
   )
     .bind(userId, ...ids)
