@@ -10,8 +10,8 @@ const PROTOCOL = "2025-03-26"
 
 const INSTRUCTIONS = `Read-only SQL for the JobRadar D1 database. Use schema first, then query with one SELECT.
 Jobs the list shows have duplicate_of IS NULL. An interview that later became a rejection keeps interviewed_at.
-Do not select users.token_hash. The posting body is job_texts(job_id, description), not jobs.description
-(that column is empty after the move). Descriptions are long — name the columns you need.`
+Do not select users.token_hash. The posting body is job_texts(job_id, description). jobs.description is always NULL.
+Descriptions are long — name the columns you need.`
 
 type Rpc = {
   jsonrpc?: string

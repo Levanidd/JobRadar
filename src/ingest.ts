@@ -5,7 +5,7 @@ import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
 import { pick } from "./locale"
 import { loadScoreQuota, QuotaError, quotaMessage } from "./quota"
-import { deleteJobTexts, JOB_DESCRIPTION, JOB_TEXT_JOIN, NO_TEXT, saveJobText, saveJobTextIfEmpty } from "./job-text"
+import { deleteJobTexts, JOB_DESCRIPTION, JOB_TEXT_JOIN, NO_TEXT, saveJobText, saveJobTextIfEmpty, textHash } from "./job-text"
 import { clipDescription, passesPrefilter } from "./prefilter"
 import { toSalary } from "./salary"
 import { scoreInBatches, scoreJobs, clampScoreConcurrency, type ScoreChunkEvent, type ScoreInput } from "./scoring"
@@ -382,28 +382,26 @@ export async function upsertJobs(
     )
   }
 
-  const storedText = new Map<string, string>()
-  const withText = wanted.flatMap((row) => {
+  const storedHash = new Map<string, string | null>()
+  const incoming = new Map<string, { text: string; hash: string }>()
+  for (const row of wanted) {
     const text = clipDescription(row.job.description)
-    return text ? [row.id] : []
-  })
-  if (withText.length > 0) {
-    // Only rows that arrived with a body. Comparing here, instead of inside the
-    // upsert, keeps changed_at the same as when the body still lived on jobs.
-    const known = await selectIn<{ id: string; description: string | null }>(
+    if (text) incoming.set(row.id, { text, hash: await textHash(text) })
+  }
+  if (incoming.size > 0) {
+    const known = await selectIn<{ id: string; text_hash: string | null }>(
       env,
-      (list) => `SELECT j.id, ${JOB_DESCRIPTION} AS description
-         FROM jobs j ${JOB_TEXT_JOIN}
-         WHERE j.id IN (${list})`,
-      withText,
+      (list) => `SELECT id, text_hash FROM jobs WHERE id IN (${list})`,
+      [...incoming.keys()],
     )
-    for (const row of known) if (row.description) storedText.set(row.id, row.description)
+    for (const row of known) storedHash.set(row.id, row.text_hash)
   }
 
   const writes: D1PreparedStatement[] = []
   /** Openings already claimed by an earlier row of this same slice. */
   const claimed = new Set<string>()
   let jobsNew = 0
+  let textsWritten = 0
 
   for (const { job, company, key, opening, id } of wanted) {
     const existing = present.has(id)
@@ -432,12 +430,13 @@ export async function upsertJobs(
       jobsNew += 1
       present.add(id)
     }
-    const description = clipDescription(job.description) ?? null
-    const textChanged = description !== null && description !== (storedText.get(id) ?? "")
+    const body = incoming.get(id)
+    const description = body?.text ?? null
+    const textChanged = body !== undefined && body.hash !== (storedHash.get(id) ?? null)
     writes.push(
       env.DB.prepare(
-        `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, location, url, posted_at, salary_min, salary_max, salary_currency, dedup_key, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
+        `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, location, url, posted_at, salary_min, salary_max, salary_currency, dedup_key, text_hash, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
          ON CONFLICT(id) DO UPDATE SET
            last_seen_at = datetime('now'),
            title = excluded.title,
@@ -448,6 +447,7 @@ export async function upsertJobs(
            salary_min = COALESCE(excluded.salary_min, jobs.salary_min),
            salary_max = COALESCE(excluded.salary_max, jobs.salary_max),
            salary_currency = COALESCE(excluded.salary_currency, jobs.salary_currency),
+           text_hash = CASE WHEN ? = 1 THEN excluded.text_hash ELSE jobs.text_hash END,
            changed_at = CASE
              WHEN excluded.title IS NOT jobs.title
                OR IFNULL(excluded.location, '') IS NOT IFNULL(jobs.location, '')
@@ -472,11 +472,16 @@ export async function upsertJobs(
         job.salary?.max ?? null,
         job.salary?.currency || null,
         opening,
+        body?.hash ?? null,
         duplicateOf,
+        textChanged ? 1 : 0,
         textChanged ? 1 : 0,
       ),
     )
-    if (description) writes.push(saveJobText(env, id, description))
+    if (textChanged && description) {
+      writes.push(saveJobText(env, id, description))
+      textsWritten += 1
+    }
 
     if (inherit) {
       writes.push(inheritFirstSeen(env, inherit.first_seen_at, id))
@@ -503,6 +508,9 @@ export async function upsertJobs(
   }
 
   await runBatch(env, writes)
+  if (incoming.size > 0) {
+    console.log(`job texts written ${textsWritten} of ${incoming.size} with a body, ${jobsNew} new`)
+  }
   return jobsNew
 }
 
@@ -812,6 +820,12 @@ async function fillLateDescriptions(
       if (!item.text) continue
       found.set(item.id, item.text)
       writes.push(saveJobTextIfEmpty(env, item.id, item.text))
+      writes.push(
+        env.DB.prepare(`UPDATE jobs SET text_hash = ? WHERE id = ? AND text_hash IS NULL`).bind(
+          await textHash(item.text),
+          item.id,
+        ),
+      )
     }
   }
   await runBatch(env, writes)
@@ -1322,6 +1336,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
   const key = companyKey(company)
   const opening = dedupKey(company, title) || null
   const description = clipDescription(input.description) ?? null
+  const hash = description ? await textHash(description) : null
   const notes = input.notes?.trim() || null
   const salary = toSalary({
     min: input.salary_min,
@@ -1333,11 +1348,11 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
   await env.DB.prepare(
     `INSERT INTO jobs (
        id, source_id, external_id, company, company_key, title, location, url,
-       posted_at, salary_min, salary_max, salary_currency, dedup_key,
+       posted_at, salary_min, salary_max, salary_currency, dedup_key, text_hash,
        first_seen_at, last_seen_at, changed_at, closed_at, status
      ) VALUES (
        ?, ?, ?, ?, ?, ?, ?, ?,
-       NULL, ?, ?, ?, ?,
+       NULL, ?, ?, ?, ?, ?,
        datetime('now'), datetime('now'), datetime('now'), NULL, 'new'
      )
      ON CONFLICT(id) DO UPDATE SET
@@ -1349,6 +1364,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
        salary_max = COALESCE(excluded.salary_max, jobs.salary_max),
        salary_currency = COALESCE(excluded.salary_currency, jobs.salary_currency),
        dedup_key = excluded.dedup_key,
+       text_hash = COALESCE(excluded.text_hash, jobs.text_hash),
        closed_at = NULL,
        last_seen_at = datetime('now'),
        changed_at = datetime('now')`,
@@ -1366,6 +1382,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
       salary?.max ?? null,
       salary?.currency || null,
       opening,
+      hash,
     )
     .run()
 

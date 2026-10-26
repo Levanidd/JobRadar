@@ -1,21 +1,24 @@
 import { placeholders, runBatch, selectIn } from "./db"
+import { clipDescription } from "./prefilter"
 import type { Bindings } from "./types"
 
 /** Joined wherever a query still has to show or score the posting body. */
 export const JOB_TEXT_JOIN = `LEFT JOIN job_texts t ON t.job_id = j.id`
 
-/**
- * Body as readers see it. job_texts wins. The jobs column is only consulted
- * when that row has not been copied yet, and SQLite stops before reading it
- * once job_texts has the text.
- */
-export const JOB_DESCRIPTION = `CASE WHEN t.description IS NOT NULL THEN t.description ELSE j.description END`
+/** The body lives in job_texts. jobs.description is always empty. */
+export const JOB_DESCRIPTION = `t.description`
 
-/** 1 when neither copy has a body. */
-export const NO_TEXT = `CASE WHEN t.description IS NOT NULL THEN 0 WHEN j.description IS NOT NULL THEN 0 ELSE 1 END`
+/** 1 when job_texts has no body. */
+export const NO_TEXT = `(t.description IS NULL)`
 
-/** 1 when either copy has a body. */
-export const HAS_TEXT = `CASE WHEN t.description IS NOT NULL THEN 1 WHEN j.description IS NOT NULL THEN 1 ELSE 0 END`
+/** 1 when job_texts has a body. */
+export const HAS_TEXT = `(t.description IS NOT NULL)`
+
+/** Same digest upsert uses to skip writing a body that did not change. */
+export async function textHash(description: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(description))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+}
 
 /** Writes the body. A later empty fetch must not wipe a body we already kept. */
 export function saveJobText(env: Bindings, jobId: string, description: string) {
@@ -108,4 +111,39 @@ export async function backfillJobTexts(
     .run()
 
   return { after: rows[rows.length - 1]!.rid, moved: rows.length }
+}
+
+/** Fills jobs.text_hash from job_texts so a later ingest can skip an unchanged body. */
+export async function backfillTextHashes(
+  env: Bindings,
+  after: number,
+  limit: number,
+): Promise<{ after: number; moved: number }> {
+  const size = Math.min(500, Math.max(1, Math.floor(limit)))
+  const picked = await env.DB.prepare(
+    `SELECT j.rowid AS rid, j.id, t.description
+     FROM jobs j
+     JOIN job_texts t ON t.job_id = j.id
+     WHERE j.rowid > ? AND j.text_hash IS NULL AND t.description IS NOT NULL
+     ORDER BY j.rowid
+     LIMIT ?`,
+  )
+    .bind(after, size)
+    .all<{ rid: number; id: string; description: string }>()
+  const rows = picked.results
+  if (rows.length === 0) return { after: 0, moved: 0 }
+
+  const writes = []
+  for (const row of rows) {
+    const text = clipDescription(row.description)
+    if (!text) continue
+    writes.push(
+      env.DB.prepare(`UPDATE jobs SET text_hash = ? WHERE id = ? AND text_hash IS NULL`).bind(
+        await textHash(text),
+        row.id,
+      ),
+    )
+  }
+  await runBatch(env, writes)
+  return { after: rows[rows.length - 1]!.rid, moved: writes.length }
 }

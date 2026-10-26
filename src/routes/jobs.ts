@@ -4,7 +4,7 @@ import { currentUser, masterGuard } from "../auth"
 import { message } from "../errors"
 import { placeholders } from "../db"
 import { createManualJob, scoreJobsByIds, scoreOneJob, setPrimaryListing } from "../ingest"
-import { backfillJobTexts, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "../job-text"
+import { backfillJobTexts, backfillTextHashes, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "../job-text"
 import { QuotaError } from "../quota"
 import type { AppEnv } from "../types"
 import { JOB_COLUMNS, JOB_SOURCE, appliedFilters, jobFilters, jobOrder } from "./job-query"
@@ -112,9 +112,11 @@ jobs.get("/api/applied", async (c) => {
   const userId = currentUser(c).id
   const { clauses, binds } = await appliedFilters(c)
   const rows = await c.env.DB.prepare(
-    `SELECT ${JOB_COLUMNS}, uj.notes, s.tier, s.label as source_label
-     ${JOB_SOURCE}
-     WHERE ${clauses}
+    `SELECT ${JOB_COLUMNS}, uj.notes, s.tier, s.label AS source_label
+     FROM user_jobs uj
+     CROSS JOIN jobs j ON j.id = uj.job_id
+     JOIN sources s ON s.id = j.source_id
+     WHERE uj.user_id = ? AND ${clauses}
      ORDER BY uj.applied_at DESC
      LIMIT 200`,
   )
@@ -192,7 +194,16 @@ jobs.get("/api/jobs", async (c) => {
   return c.json({ jobs: ids.flatMap((id) => { const row = byId.get(id); return row ? [row] : [] }) })
 })
 
-/** Moves posting bodies out of jobs. Master only. Call again with the returned rowid until it is 0. */
+/** Fills jobs.text_hash from job_texts. Master only. Call again with the returned rowid until it is 0. */
+jobs.post("/api/jobs/backfill-text-hashes", async (c) => {
+  const denied = masterGuard(c)
+  if (denied) return denied
+  const after = Number(c.req.query("after") ?? 0)
+  const limit = Number(c.req.query("limit") ?? 500)
+  if (!Number.isFinite(after) || after < 0) return c.json({ error: "after must be a rowid" }, 400)
+  if (!Number.isFinite(limit) || limit < 1) return c.json({ error: "limit must be at least 1" }, 400)
+  return c.json(await backfillTextHashes(c.env, after, limit))
+})
 jobs.post("/api/jobs/backfill-texts", async (c) => {
   const denied = masterGuard(c)
   if (denied) return denied
