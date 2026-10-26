@@ -101,6 +101,18 @@ describe("upsertJobs", () => {
     })
   })
 
+  it("does not rewrite a body when the board sends the same text again", async () => {
+    const source = await addSource()
+    await upsertJobs(env, source, [job()], new Set())
+    await env.DB.prepare(`UPDATE job_texts SET updated_at = '2000-01-01 00:00:00'`).run()
+    await upsertJobs(env, source, [job()], new Set())
+    expect(await one(env, `SELECT updated_at FROM job_texts`)).toMatchObject({
+      updated_at: "2000-01-01 00:00:00",
+    })
+    const hashed = await one<{ text_hash: string }>(env, `SELECT text_hash FROM jobs`)
+    expect(hashed?.text_hash).toMatch(/^[0-9a-f]{40}$/)
+  })
+
   it("moves a stored body into job_texts and leaves jobs.description empty", async () => {
     const source = await addSource()
     const id = "job-with-body"
