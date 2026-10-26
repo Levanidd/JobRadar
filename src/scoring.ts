@@ -118,7 +118,8 @@ const CHAT_RESPONSE_FORMAT = {
 
 const CHAT_JSON_HINT = `
 
-Answer with JSON only, no prose: {"scores":[{"external_id":"<id>","score":<0-100>,"reason":"<one sentence>","flags":[]}]}.
+Answer with JSON only, no prose: {"scores":[{"external_id":"<id>","score":<0-100>,"reason":"<short>","flags":[]}]}.
+The reason is at most 20 words, at most 8 words when the score is below 50, and at most two sentences when the score is 70 or higher. Do not repeat the job title or the company name.
 Allowed flags: ${FLAGS.join(", ")}.`
 
 export function scoringSystemPrompt(profile: string): string {
@@ -127,7 +128,10 @@ export function scoringSystemPrompt(profile: string): string {
 Scoring instructions from the user (the only source of scoring rules):
 ${profile}
 
-Return one entry in "scores" per job, keyed by its external_id, with a score from 0 to 100. Use only the allowed flags. Never invent jobs.`
+Return one entry in "scores" per job, keyed by its external_id, with a score from 0 to 100.
+Write the reason as one sentence of at most 20 words. A score of 70 or higher may use two sentences. A score below 50 uses at most 8 words.
+Do not repeat the job title or the company name in the reason.
+Use only the allowed flags. Never invent jobs.`
 }
 
 export function localScore(job: ScoreInput): ScoreOutput {
@@ -275,10 +279,37 @@ const RETRIES = 2
 const RETRY_WAIT_MS = [800, 1600]
 const PING_MAX_TOKENS = 16
 
-/** 429 / 5xx / 524 are the model's (or Cloudflare's) transient failures. */
+/** 429 / 5xx / 524, an empty body, and JSON we cannot read are transient. A 4xx is not. */
 export function isRetryableModelError(error: unknown): boolean {
+  if (error instanceof ScoringError) {
+    return (
+      error.code === "empty" ||
+      error.code === "malformed_json" ||
+      error.code === "missing_score" ||
+      error.code === "timeout" ||
+      error.code === "http_429" ||
+      error.code === "http_5xx"
+    )
+  }
   const text = error instanceof Error ? error.message : String(error)
+  if (/empty response|malformed JSON|no scores array|timed out|timeout|aborted/i.test(text)) return true
   return RETRYABLE_STATUS.test(text)
+}
+
+/** 429 is backpressure, not a bad posting, so it must not spend one of the three attempts. */
+export function isRateLimitError(error: unknown): boolean {
+  if (error instanceof ScoringError) return error.code === "http_429"
+  const text = error instanceof Error ? error.message : String(error)
+  return /call failed: 429\b/.test(text)
+}
+
+export const SCORE_BATCH = 10
+export const DEFAULT_SCORE_CONCURRENCY = 3
+
+export function clampScoreConcurrency(value: unknown): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_SCORE_CONCURRENCY
+  return Math.min(6, Math.max(1, Math.floor(parsed)))
 }
 
 export function scoringErrorCode(error: unknown): ScoringErrorCode {
@@ -580,23 +611,73 @@ export async function scoreOne(
   return { score, text }
 }
 
+export type ScoreChunkEvent =
+  | { ok: true; jobs: ScoreInput[]; scores: ScoreOutput[] }
+  | { ok: false; jobs: ScoreInput[]; error: unknown; rateLimited: boolean; fatal: boolean }
+
+/**
+ * Sends postings in batches of 10. Each batch reports itself as soon as the
+ * model answers, so a later failure does not throw away the replies already
+ * received. A 429 drops the rest of this step to one batch at a time.
+ */
 export async function scoreInBatches(
   jobs: ScoreInput[],
   profile: string,
   config: ScoringConfig,
+  options: {
+    concurrency?: number
+    onChunk?: (event: ScoreChunkEvent) => Promise<void>
+  } = {},
 ): Promise<{ scores: ScoreOutput[]; skipped: number }> {
   const scores: ScoreOutput[] = []
   let skipped = 0
-  for (let i = 0; i < jobs.length; i += 10) {
-    const chunk = jobs.slice(i, i + 10)
+  const chunks: ScoreInput[][] = []
+  for (let i = 0; i < jobs.length; i += SCORE_BATCH) chunks.push(jobs.slice(i, i + SCORE_BATCH))
+
+  let next = 0
+  let fatal: unknown = null
+  let rateLimited = false
+  const report = async (event: ScoreChunkEvent) => {
     try {
-      scores.push(...(await scoreJobs(chunk, profile, config)))
+      await options.onChunk?.(event)
     } catch (error) {
-      // A 524 on one chunk used to failCycle the whole run. Leave these jobs
-      // unscored; the next scoring hop picks them up.
-      if (!isRetryableModelError(error)) throw error
-      skipped += chunk.length
+      // The claim expires and the posting is picked up again. Losing the
+      // write must not discard the rest of the step.
+      console.error("scoring result was not saved", error)
     }
   }
+
+  async function runChunk(chunk: ScoreInput[]) {
+    try {
+      const got = await scoreJobs(chunk, profile, config)
+      scores.push(...got)
+      await report({ ok: true, jobs: chunk, scores: got })
+    } catch (error) {
+      if (!isRetryableModelError(error)) {
+        fatal = error
+        await report({ ok: false, jobs: chunk, error, rateLimited: false, fatal: true })
+        return
+      }
+      if (isRateLimitError(error)) rateLimited = true
+      skipped += chunk.length
+      await report({ ok: false, jobs: chunk, error, rateLimited: isRateLimitError(error), fatal: false })
+    }
+  }
+
+  async function pool(width: number) {
+    const inflight = new Set<Promise<void>>()
+    while (next < chunks.length && !fatal && !rateLimited) {
+      while (inflight.size >= width) await Promise.race(inflight)
+      if (fatal || rateLimited || next >= chunks.length) break
+      const chunk = chunks[next++]!
+      const task = runChunk(chunk).finally(() => inflight.delete(task))
+      inflight.add(task)
+    }
+    await Promise.all(inflight)
+  }
+
+  await pool(clampScoreConcurrency(options.concurrency))
+  while (next < chunks.length && !fatal) await runChunk(chunks[next++]!)
+  if (fatal) throw fatal
   return { scores, skipped }
 }
