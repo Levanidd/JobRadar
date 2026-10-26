@@ -124,6 +124,11 @@ export async function jobFilters(c: Ctx, withCompanies: boolean): Promise<Where>
   return { clauses: clauses.join(" AND "), binds }
 }
 
+/** A typed company name matches as a substring, and `%` / `_` stay literal. */
+function likeContains(value: string): string {
+  return `%${value.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+}
+
 /** The applied list is its own view: pipeline status instead of the list filters. */
 export async function appliedFilters(c: Ctx): Promise<Where> {
   const clauses = ["uj.applied_at IS NOT NULL", "j.duplicate_of IS NULL"]
@@ -131,6 +136,12 @@ export async function appliedFilters(c: Ctx): Promise<Where> {
   const blocked = await excludeBlockedCompaniesForUser(c.env, currentUser(c).id, "j.company_key")
   clauses.push(blocked.sql)
   binds.push(...blocked.binds)
+
+  const company = (c.req.query("company") ?? "").trim().slice(0, 80)
+  if (company) {
+    clauses.push("j.company LIKE ? ESCAPE '\\'")
+    binds.push(likeContains(company))
+  }
 
   const status = c.req.query("status") ?? ""
   if (status === "applied") {

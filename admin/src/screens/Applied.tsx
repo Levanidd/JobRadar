@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useLoader } from "../app-context"
 import { getLang, useT } from "../i18n"
-import { oneOf, usePersistentState } from "../persist"
+import { oneOf, text, usePersistentState } from "../persist"
 import { JobCard, openOnDoubleClick, statusLabel } from "../components/JobCard"
 import { SortHeader } from "../components/SortHeader"
 import { Age, Count, Empty, Field, ScoreBadge, Skeletons, formatSalary } from "../components/common"
@@ -297,6 +297,12 @@ export function Applied({
   const [composing, setComposing] = useState(false)
   const [sort, setSort] = usePersistentState<AppliedSort | null>("applied.sort", null, reviveSort)
   const [dir, setDir] = usePersistentState<"asc" | "desc">("applied.dir", "desc", oneOf("asc", "desc"))
+  const [company, setCompany] = usePersistentState("applied.company", "", text)
+  // The request uses the debounced name, so typing does not blank the table.
+  const companyQueryRef = useRef(company.trim())
+  const [companyTick, setCompanyTick] = useState(0)
+  const [listedCompany, setListedCompany] = useState(company.trim())
+  const request = useRef(0)
 
   const rows = useMemo(() => {
     if (!jobs || !sort) return jobs
@@ -319,14 +325,30 @@ export function Applied({
   const load = useCallback(
     async (silent = false) => {
       if (!silent) setJobs(null)
+      const token = ++request.current
       const interviewedFilter = status === "rejected" && interviewed ? interviewed : undefined
-      const result = await run(() => api.applied(status || undefined, interviewedFilter))
-      if (result) setJobs(result.jobs)
+      const name = companyQueryRef.current
+      const result = await run(() => api.applied(status || undefined, interviewedFilter, name || undefined))
+      if (token !== request.current) return
+      if (result) {
+        setListedCompany(name)
+        setJobs(result.jobs)
+      }
     },
     [run, status, interviewed],
   )
 
-  useLoader(load)
+  useLoader(load, companyTick)
+
+  useEffect(() => {
+    const next = company.trim()
+    if (next === companyQueryRef.current) return
+    const handle = window.setTimeout(() => {
+      companyQueryRef.current = next
+      setCompanyTick((tick) => tick + 1)
+    }, 200)
+    return () => window.clearTimeout(handle)
+  }, [company])
 
   async function openCard(job: Job) {
     setOpen(job)
@@ -429,6 +451,14 @@ export function Applied({
             <option value="no">{t("No interview")}</option>
           </select>
         ) : null}
+        <input
+          className="input input-inline"
+          type="search"
+          placeholder={t("Company name")}
+          aria-label={t("Company name")}
+          value={company}
+          onChange={(event) => setCompany(event.target.value)}
+        />
         <button className="btn btn-primary btn-sm" onClick={() => setComposing(true)}>
           {t("Add a job")}
         </button>
@@ -442,8 +472,12 @@ export function Applied({
         <Skeletons />
       ) : rows.length === 0 ? (
         <Empty
-          title={t("Nothing here yet")}
-          hint={t("Mark Applied in the job list, or add a role by hand if it isn't on an ATS.")}
+          title={listedCompany ? t("Nothing found") : t("Nothing here yet")}
+          hint={
+            listedCompany
+              ? t("No applications for this company.")
+              : t("Mark Applied in the job list, or add a role by hand if it isn't on an ATS.")
+          }
         />
       ) : (
         <div className="table-wrap">

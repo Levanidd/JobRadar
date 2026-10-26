@@ -260,10 +260,12 @@ export const api = {
     return post(`/jobs/${encodeURIComponent(id)}/primary`)
   },
 
-  applied(status?: string, interviewed?: "yes" | "no"): Promise<{ jobs: Job[] }> {
+  applied(status?: string, interviewed?: "yes" | "no", company?: string): Promise<{ jobs: Job[] }> {
     const params = new URLSearchParams()
     if (status) params.set("status", status)
     if (interviewed) params.set("interviewed", interviewed)
+    const name = company?.trim()
+    if (name) params.set("company", name)
     const query = params.toString()
     return request(`/applied${query ? `?${query}` : ""}`)
   },

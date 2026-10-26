@@ -104,6 +104,8 @@ export const ru: Record<string, string> = {
   "Had an interview": "Был собес",
   "No interview": "Без собеса",
   "Add a job": "Добавить вакансию",
+  "Company name": "Название компании",
+  "No applications for this company.": "Нет откликов в эту компанию.",
   application: "отклик",
   "a few applications": "отклика",
   applications: "откликов",
