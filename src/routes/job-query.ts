@@ -78,11 +78,19 @@ export async function jobFilters(c: Ctx, withCompanies: boolean): Promise<Where>
 
   const sourceId = Number(c.req.query("source_id") ?? 0)
   if (sourceId) {
+    // "+" stops SQLite using idx_jobs_duplicate_of, so the plan starts from
+    // the source's own rows instead of walking every primary in the table.
+    const openPrimary = "j.duplicate_of IS NULL"
+    const at = clauses.indexOf(openPrimary)
+    if (at >= 0) clauses[at] = "+j.duplicate_of IS NULL"
+    else clauses.push("+j.duplicate_of IS NULL")
     clauses.push(
-      `(j.source_id = ? OR EXISTS (
-         SELECT 1 FROM jobs alt
-         WHERE alt.duplicate_of = j.id AND alt.source_id = ? AND alt.closed_at IS NULL
-       ))`,
+      `j.id IN (
+         SELECT id FROM jobs WHERE source_id = ? AND closed_at IS NULL
+         UNION
+         SELECT duplicate_of FROM jobs
+         WHERE source_id = ? AND closed_at IS NULL AND duplicate_of IS NOT NULL
+       )`,
     )
     binds.push(sourceId, sourceId)
   }

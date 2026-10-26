@@ -275,6 +275,38 @@ describe("jobs", () => {
     ).toBe(404)
   })
 
+  it("includes a primary from another source when this source holds its open copy", async () => {
+    const primaryId = await seedJob({ title: "Senior Product Manager, Mobile" })
+    const primarySource = await one<{ id: number }>(env, `SELECT id FROM sources WHERE token = 'acme'`)
+    await env.DB.prepare(
+      `INSERT INTO sources (kind, tier, label, provider, token) VALUES ('query', 'discovery', 'Aggregator', 'arbeitnow', 'product')`,
+    ).run()
+    const copySource = await one<{ id: number }>(env, `SELECT id FROM sources WHERE provider = 'arbeitnow'`)
+    await upsertJobs(
+      env,
+      (await one<SourceRow>(env, `SELECT * FROM sources WHERE id = ?`, copySource!.id))!,
+      [
+        {
+          externalId: "9",
+          title: "Senior Product Manager, Mobile",
+          company: "Acme GmbH",
+          url: "https://www.arbeitnow.com/jobs/acme-mobile",
+          location: "Berlin",
+        },
+      ],
+      new Set(),
+    )
+
+    const onCopy = await call(`/api/jobs?source_id=${copySource!.id}`)
+    expect(onCopy.body.jobs.map((job: { id: string }) => job.id)).toEqual([primaryId])
+    const companies = await call(`/api/jobs/companies?source_id=${copySource!.id}`)
+    expect(companies.body.companies).toEqual([{ company_key: "acme", company: "Acme GmbH", jobs: 1 }])
+
+    const onPrimary = await call(`/api/jobs?source_id=${primarySource!.id}`)
+    expect(onPrimary.body.jobs.map((job: { id: string }) => job.id)).toEqual([primaryId])
+    expect((await call("/api/jobs")).body.jobs).toHaveLength(1)
+  })
+
   it("hides duplicate listings until a person picks one as primary", async () => {
     const primaryId = await seedJob()
     await env.DB.prepare(
