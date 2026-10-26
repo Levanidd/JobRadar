@@ -43,6 +43,8 @@ describe("isRetryableModelError", () => {
     expect(isRetryableModelError(new Error("Gemini call failed: 402 credits depleted"))).toBe(false)
     expect(isRetryableModelError(new Error("Gemini call failed: 400 thinking level"))).toBe(false)
     expect(isRetryableModelError(new Error("Nebius call failed: 401 invalid key"))).toBe(false)
+    expect(isRetryableModelError(new Error("Nebius returned an empty response"))).toBe(true)
+    expect(isRetryableModelError(new Error("Nebius returned malformed JSON"))).toBe(true)
   })
 })
 

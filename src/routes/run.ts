@@ -41,9 +41,10 @@ run.get("/api/run/plan", async (c) => {
 })
 
 run.post("/api/score", async (c) => {
-  const body = await c.req.json<{ limit?: number }>().catch(() => ({}) as { limit?: number })
+  const body = await c.req.json<{ limit?: number; include_old?: boolean }>().catch(() => ({}) as { limit?: number; include_old?: boolean })
   const limit = Number(body.limit) > 0 ? Number(body.limit) : undefined
-  return c.json(await prefilterAndScore(c.env, currentUser(c).id, limit))
+  const includeOld = body.include_old === true || c.req.query("include_old") === "1"
+  return c.json(await prefilterAndScore(c.env, currentUser(c).id, limit, undefined, { includeOld }))
 })
 
 run.post("/api/notify", async (c) => c.json({ notified: await notifyNew(c.env) }))
@@ -79,7 +80,7 @@ run.get("/api/run/log", async (c) => {
   const [rows, count] = await Promise.all([
     c.env.DB.prepare(
       `SELECT r.id, r.kind, r.status, r.started_at, r.finished_at,
-         r.sources, r.found, r.fresh, r.failed, r.scored, r.error, u.name AS user_name,
+         r.sources, r.found, r.fresh, r.failed, r.scored, r.failed_scoring, r.error, u.name AS user_name,
          COALESCE((SELECT SUM(b.input_tokens) FROM model_batches b WHERE b.run_id = r.id), 0) AS input_tokens,
          COALESCE((SELECT SUM(b.output_tokens) FROM model_batches b WHERE b.run_id = r.id), 0) AS output_tokens
        FROM cycle_runs r

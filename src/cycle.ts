@@ -3,7 +3,7 @@ import { notifyNew, pickSources, prefilterAndScore, runSourceStep, type SourcePo
 import type { Bindings, SourceRow } from "./types"
 import type { UsageContext } from "./usage"
 
-const SCORE_CHUNK = 30
+const SCORE_CHUNK = 40
 const MAX_HOPS = 1000
 
 export type CyclePhase = "sources" | "scoring" | "digest"
@@ -121,7 +121,8 @@ async function closeRun(env: Bindings): Promise<void> {
   await env.DB.prepare(
     `UPDATE cycle_runs SET
        status = c.status, finished_at = c.finished_at, sources = c.source_total,
-       found = c.found, fresh = c.fresh, failed = c.failed, scored = c.scored, error = c.error
+       found = c.found, fresh = c.fresh, failed = c.failed, scored = c.scored,
+       failed_scoring = c.failed_scoring, error = c.error
      FROM (SELECT * FROM cycles WHERE id = 1) AS c
      WHERE cycle_runs.id = c.run_id AND cycle_runs.status = 'running'`,
   ).run()
@@ -291,29 +292,27 @@ async function advance(env: Bindings, row: CycleRow): Promise<boolean> {
     const step = userId
       ? await prefilterAndScore(env, userId, SCORE_CHUNK, await cycleUsage(env, row.run_id, userId))
       : { scored: 0, remaining: 0, more: false, limited: false }
-    const scored = row.scored + step.scored
     if (step.more) {
+      // Scores were added as each model reply landed. Don't add them again.
       await env.DB.prepare(
-        `UPDATE cycles SET scored = ?, done = ?, total = ?,
+        `UPDATE cycles SET done = scored, total = scored + ?,
            current_label = NULL, current_id = NULL, updated_at = datetime('now')
          WHERE id = 1`,
       )
-        .bind(scored, scored, scored + step.remaining)
+        .bind(step.remaining)
         .run()
-      return true
+      // Another walker still holds claims. Pausing lets that work finish
+      // instead of spinning empty hops until the claim expires.
+      return !step.idle
     }
-    // This user is done: hand the scoring phase to the next one in the queue,
-    // or move on to the digest when nobody is waiting.
     await env.DB.prepare(
-      `UPDATE cycles SET scored = ?1, done = ?1, total = ?1,
+      `UPDATE cycles SET done = scored, total = scored,
          phase = CASE WHEN json_array_length(score_queue) > 0 THEN 'scoring' ELSE 'digest' END,
          user_id = CASE WHEN json_array_length(score_queue) > 0 THEN json_extract(score_queue, '$[0]') ELSE user_id END,
          score_queue = CASE WHEN json_array_length(score_queue) > 0 THEN json_remove(score_queue, '$[0]') ELSE score_queue END,
          current_label = NULL, current_id = NULL, updated_at = datetime('now')
        WHERE id = 1`,
-    )
-      .bind(scored)
-      .run()
+    ).run()
     return true
   }
 
@@ -365,16 +364,15 @@ export function enqueueTick(env: Bindings, ctx: { waitUntil(promise: Promise<unk
 }
 
 /**
- * Cloudflare kills waitUntil around 30s. Cron runs every minute; 45s of
- * silence skipped that next tick (age ~32s) and the cycle sat idle a
- * whole extra minute. 25s is just above a 20s fetch hop, so a live hop
- * is left alone and the following cron always continues.
+ * Cloudflare kills waitUntil around 30s. A scoring hop now heartbeats after
+ * every model reply, so two minutes of silence means the walker is actually
+ * gone — not just busy with a batch that used to take about a minute.
  */
 export async function resumeStuckCycle(env: Bindings): Promise<void> {
   const claimed = await env.DB.prepare(
     `UPDATE cycles SET updated_at = datetime('now')
      WHERE id = 1 AND status = 'running'
-       AND updated_at < datetime('now', '-25 seconds')`,
+       AND updated_at < datetime('now', '-2 minutes')`,
   ).run()
   if (!Number(claimed.meta.changes)) return
   await walkCycle(env)

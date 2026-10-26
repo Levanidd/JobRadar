@@ -466,6 +466,53 @@ describe("prefilterAndScore", () => {
     expect(second).toEqual({ scored: 1, remaining: 0, more: false, limited: false })
   })
 
+  it("leaves postings older than two weeks until someone asks for them", async () => {
+    const source = await addSource()
+    await upsertJobs(env, source, [job()], new Set())
+    await env.DB.prepare(`UPDATE jobs SET first_seen_at = datetime('now', '-30 days')`).run()
+
+    expect(await prefilterAndScore(env, TEST_USER_ID)).toMatchObject({ scored: 0, more: false })
+    expect(await prefilterAndScore(env, TEST_USER_ID, undefined, undefined, { includeOld: true })).toMatchObject({
+      scored: 1,
+    })
+  })
+
+  it("does not send a posting the model already failed three times", async () => {
+    const source = await addSource()
+    await upsertJobs(env, source, [job()], new Set())
+    const stored = await one<{ id: string }>(env, `SELECT id FROM jobs`)
+    await env.DB.prepare(
+      `INSERT INTO user_jobs (user_id, job_id, scoring_attempts) VALUES (?, ?, 3)`,
+    )
+      .bind(TEST_USER_ID, stored!.id)
+      .run()
+
+    expect(await prefilterAndScore(env, TEST_USER_ID)).toMatchObject({ scored: 0 })
+  })
+
+  it("lets two walkers score a posting only once", async () => {
+    const source = await addSource()
+    await upsertJobs(
+      env,
+      source,
+      [
+        job({ externalId: "1", url: "https://acme.example/1" }),
+        job({ externalId: "2", title: "Head of Product", url: "https://acme.example/2" }),
+      ],
+      new Set(),
+    )
+
+    const [first, second] = await Promise.all([
+      prefilterAndScore(env, TEST_USER_ID),
+      prefilterAndScore(env, TEST_USER_ID),
+    ])
+    expect(first.scored + second.scored).toBe(2)
+    expect(await rows(env, `SELECT job_id FROM user_jobs WHERE score IS NOT NULL`)).toHaveLength(2)
+    expect(await one<{ n: number }>(env, `SELECT COUNT(*) AS n FROM user_jobs WHERE scoring_claim_id IS NOT NULL`)).toMatchObject({
+      n: 0,
+    })
+  })
+
   it("marks a cold source as already delivered instead of notifying its backlog", async () => {
     const source = await addSource()
     await upsertJobs(env, source, [job()], new Set())

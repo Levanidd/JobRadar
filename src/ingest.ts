@@ -8,7 +8,7 @@ import { loadScoreQuota, QuotaError, quotaMessage } from "./quota"
 import { deleteJobTexts, JOB_DESCRIPTION, JOB_TEXT_JOIN, NO_TEXT, saveJobText, saveJobTextIfEmpty } from "./job-text"
 import { clipDescription, passesPrefilter } from "./prefilter"
 import { toSalary } from "./salary"
-import { scoreInBatches, scoreJobs, type ScoreInput } from "./scoring"
+import { scoreInBatches, scoreJobs, clampScoreConcurrency, type ScoreChunkEvent, type ScoreInput } from "./scoring"
 import {
   excludeBlockedCompaniesForUser,
   resolveScoringConfig,
@@ -691,6 +691,8 @@ export type ScorePass = {
   remaining: number
   /** Whether another pass would still find work. Drives the cycle's scoring phase. */
   more: boolean
+  /** Fresh claims are in flight, but this pass itself scored nothing. The walker should pause. */
+  idle?: boolean
   /** The monthly limit left part of the queue unscored until it resets. */
   limited: boolean
 }
@@ -699,7 +701,29 @@ export type ScorePass = {
  * How many unscored rows one pass pulls in. Without a cap a large backlog made
  * every hop read the whole table, which is what used to burn D1's daily quota.
  */
+const CLAIM_TTL = "-10 minutes"
+const DEFAULT_SCORE_WINDOW_DAYS = 14
 const CANDIDATE_WINDOW = 500
+
+async function scoreWindowDays(env: Bindings, userId: number): Promise<number> {
+  const row = await env.DB.prepare(`SELECT score_window_days FROM user_profiles WHERE user_id = ?`)
+    .bind(userId)
+    .first<{ score_window_days: number | null }>()
+  const days = Number(row?.score_window_days)
+  if (!Number.isFinite(days) || days <= 0) return DEFAULT_SCORE_WINDOW_DAYS
+  return Math.min(3650, Math.floor(days))
+}
+
+async function freshScoringClaims(env: Bindings, userId: number): Promise<number> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM user_jobs
+     WHERE user_id = ? AND scoring_claimed_at IS NOT NULL
+       AND scoring_claimed_at >= datetime('now', ?)`,
+  )
+    .bind(userId, CLAIM_TTL)
+    .first<{ n: number }>()
+  return Number(row?.n ?? 0)
+}
 
 type Candidate = {
   id: string
@@ -731,6 +755,8 @@ function verdictUpdate(env: Bindings, userId: number, id: string, verdict: Verdi
        score = excluded.score,
        score_reason = excluded.score_reason,
        flags = excluded.flags,
+       scoring_claimed_at = NULL,
+       scoring_claim_id = NULL,
        status = CASE WHEN user_jobs.status = 'off_profile' THEN 'new' ELSE user_jobs.status END`,
   ).bind(userId, id, verdict.score, verdict.score_reason, verdict.flags)
 }
@@ -802,8 +828,10 @@ export async function prefilterAndScore(
   userId: number,
   limit?: number,
   usage: UsageContext = { kind: "score", userId, trigger: "manual" },
+  options: { includeOld?: boolean } = {},
 ): Promise<ScorePass> {
   const blocked = await excludeBlockedCompaniesForUser(env, userId, "j.company_key")
+  const windowDays = await scoreWindowDays(env, userId)
 
   const open = await env.DB.prepare(
     `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, j.dedup_key,
@@ -813,11 +841,14 @@ export async function prefilterAndScore(
      LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.closed_at IS NULL AND j.duplicate_of IS NULL AND uj.score IS NULL
        AND COALESCE(uj.status, 'new') NOT IN ('ignored', 'rejected', 'off_profile')
+       AND (uj.scoring_claimed_at IS NULL OR uj.scoring_claimed_at < datetime('now', ?))
+       AND COALESCE(uj.scoring_attempts, 0) < 3
+       AND (? = 1 OR j.first_seen_at >= datetime('now', ?))
        AND ${blocked.sql}
      ORDER BY j.first_seen_at
      LIMIT ?`,
   )
-    .bind(userId, ...blocked.binds, CANDIDATE_WINDOW)
+    .bind(userId, CLAIM_TTL, options.includeOld ? 1 : 0, `-${windowDays} days`, ...blocked.binds, CANDIDATE_WINDOW)
     .all<Candidate>()
 
   const rules = await resolveUserPrefilter(env, userId)
@@ -876,8 +907,33 @@ export async function prefilterAndScore(
   // Without a key the local heuristic scores for free, so only model calls are capped.
   const allowance = config.apiKey ? (await loadScoreQuota(env, userId)).remaining : null
   const cap = Math.min(limit || Infinity, allowance ?? Infinity)
-  const batch = toScore.slice(0, cap)
-  const remaining = toScore.length - batch.length
+  const wanted = toScore.slice(0, cap)
+  const remaining = toScore.length - wanted.length
+  const claim = crypto.randomUUID()
+  let batch = wanted
+
+  if (wanted.length > 0) {
+    await runBatch(
+      env,
+      wanted.map((item) =>
+        env.DB.prepare(`INSERT OR IGNORE INTO user_jobs (user_id, job_id) VALUES (?, ?)`).bind(userId, item.id),
+      ),
+    )
+    await env.DB.prepare(
+      `UPDATE user_jobs SET scoring_claimed_at = datetime('now'), scoring_claim_id = ?
+       WHERE user_id = ? AND job_id IN (${placeholders(wanted.length)}) AND score IS NULL
+         AND (scoring_claimed_at IS NULL OR scoring_claimed_at < datetime('now', ?))`,
+    )
+      .bind(claim, userId, ...wanted.map((item) => item.id), CLAIM_TTL)
+      .run()
+    const held = await env.DB.prepare(
+      `SELECT job_id FROM user_jobs WHERE user_id = ? AND scoring_claim_id = ?`,
+    )
+      .bind(userId, claim)
+      .all<{ job_id: string }>()
+    const heldIds = new Set(held.results.map((row) => row.job_id))
+    batch = wanted.filter((item) => heldIds.has(item.id))
+  }
 
   if (batch.length > 0) {
     const bodies = await selectIn<{ id: string; url: string; description: string | null }>(
@@ -895,47 +951,106 @@ export async function prefilterAndScore(
     }
   }
 
-  const profile = await profileContent(env, userId)
-  const { scores, skipped } = await withUsage(env, usage, config, (tracked) =>
-    scoreInBatches(
-      batch.map((item) => item.input),
-      profile,
-      tracked,
-    ),
-  )
-
   const byId = new Map(batch.map((item) => [item.id, item]))
-  const writes: D1PreparedStatement[] = []
-  for (const item of scores) {
-    const verdict = { score: item.score, score_reason: item.reason, flags: JSON.stringify(item.flags) }
-    writes.push(verdictUpdate(env, userId, item.external_id, verdict))
+  const concurrencyRow = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'score_concurrency'`)
+    .first<{ value: string }>()
 
-    const scored = byId.get(item.external_id)
-    if (!scored) continue
-    for (const twin of (scored.dedup_key && awaiting.get(scored.dedup_key)) || []) {
-      writes.push(verdictUpdate(env, userId, twin, verdict))
-    }
-    if (scored.company_key) {
-      writes.push(
-        env.DB.prepare(
-          `UPDATE discovered_companies
-           SET best_score = CASE WHEN best_score IS NULL OR best_score < ? THEN ? ELSE best_score END
-           WHERE company_key = ?`,
-        ).bind(item.score, item.score, scored.company_key),
-      )
-    }
+  async function releaseClaim(ids: string[], countAttempt: boolean) {
+    if (ids.length === 0) return
+    await env.DB.prepare(
+      `UPDATE user_jobs SET
+         scoring_claimed_at = NULL,
+         scoring_claim_id = NULL,
+         scoring_attempts = scoring_attempts + ?
+       WHERE user_id = ? AND scoring_claim_id = ? AND job_id IN (${placeholders(ids.length)})`,
+    )
+      .bind(countAttempt ? 1 : 0, userId, claim, ...ids)
+      .run()
   }
-  await runBatch(env, writes)
+
+  async function noteScoringProgress(scored: number, failed: number) {
+    if (scored === 0 && failed === 0) return
+    await env.DB.prepare(
+      `UPDATE cycles SET scored = scored + ?, failed_scoring = failed_scoring + ?, updated_at = datetime('now')
+       WHERE id = 1 AND status = 'running' AND user_id = ?`,
+    )
+      .bind(scored, failed, userId)
+      .run()
+  }
+
+  const profile = await profileContent(env, userId)
+  let scores: Array<{ external_id: string; score: number; reason: string; flags: string[] }> = []
+  let skipped = 0
+  try {
+    const scored = await withUsage(env, usage, config, (tracked) =>
+      scoreInBatches(
+        batch.map((item) => item.input),
+        profile,
+        tracked,
+        {
+          concurrency: clampScoreConcurrency(concurrencyRow?.value),
+          onChunk: async (event: ScoreChunkEvent) => {
+          const ids = event.jobs.map((job) => job.external_id)
+          if (!event.ok) {
+            await releaseClaim(ids, !event.rateLimited && !event.fatal)
+            if (!event.rateLimited && !event.fatal) await noteScoringProgress(0, ids.length)
+            return
+          }
+          const writes: D1PreparedStatement[] = []
+          for (const item of event.scores) {
+            const verdict = { score: item.score, score_reason: item.reason, flags: JSON.stringify(item.flags) }
+            writes.push(verdictUpdate(env, userId, item.external_id, verdict))
+            const scored = byId.get(item.external_id)
+            if (!scored) continue
+            for (const twin of (scored.dedup_key && awaiting.get(scored.dedup_key)) || []) {
+              writes.push(verdictUpdate(env, userId, twin, verdict))
+            }
+            if (scored.company_key) {
+              writes.push(
+                env.DB.prepare(
+                  `UPDATE discovered_companies
+                   SET best_score = CASE WHEN best_score IS NULL OR best_score < ? THEN ? ELSE best_score END
+                   WHERE company_key = ?`,
+                ).bind(item.score, item.score, scored.company_key),
+              )
+            }
+          }
+          writes.push(
+            env.DB.prepare(
+              `UPDATE cycles SET scored = scored + ?, updated_at = datetime('now')
+               WHERE id = 1 AND status = 'running' AND user_id = ?`,
+            ).bind(event.scores.length, userId),
+          )
+          await runBatch(env, writes)
+          },
+        },
+      ),
+    )
+    scores = scored.scores
+    skipped = scored.skipped
+  } catch (error) {
+    await env.DB.prepare(
+      `UPDATE user_jobs SET scoring_claimed_at = NULL, scoring_claim_id = NULL
+       WHERE user_id = ? AND scoring_claim_id = ?`,
+    )
+      .bind(userId, claim)
+      .run()
+    throw error
+  }
   await bootstrapColdSources(env, userId)
 
+  const pending = await freshScoringClaims(env, userId)
   const resolved = dropIds.length + inherited.length + scores.length
+  const idle = pending > 0 && scores.length === 0 && skipped === 0 && remaining === 0
   return {
     scored: scores.length,
     remaining,
     more:
       skipped > 0 ||
       (remaining > 0 && scores.length > 0) ||
-      (open.results.length === CANDIDATE_WINDOW && resolved > 0),
+      (open.results.length === CANDIDATE_WINDOW && resolved > 0) ||
+      pending > 0,
+    ...(idle ? { idle: true } : {}),
     limited: allowance !== null && toScore.length > allowance,
   }
 }
