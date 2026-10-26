@@ -38,21 +38,50 @@ export function jobOrder(c: Ctx): string {
   return `${expr} ${dir} NULLS LAST, j.first_seen_at DESC, j.id`
 }
 
-export async function jobFilters(c: Ctx, withCompanies: boolean): Promise<Where> {
+/** These statuses exist only on a user_jobs row, so the list can start there. */
+const ROW_STATUSES = new Set(["notified", "saved", "applied", "interview", "rejected", "ignored", "off_profile"])
+
+/**
+ * True when every matching posting has a user_jobs row. Unscored postings
+ * with no row at all stay on the jobs scan.
+ */
+export function jobsFromUser(c: Ctx): boolean {
+  if (Number(c.req.query("min_score") ?? 0) > 0) return true
+  const status = c.req.query("status") ?? ""
+  if (ROW_STATUSES.has(status)) return true
+  return c.req.query("viewed") === "yes" || c.req.query("later") === "yes" || c.req.query("applied") === "yes"
+}
+
+/**
+ * The status index can seek `status = ?`. A score floor without that equality
+ * is a range on idx_user_jobs_score; leaving it to the planner walked every job.
+ */
+export function userJobsHint(c: Ctx): string {
+  const status = c.req.query("status") ?? ""
+  const singleStatus = status !== "" && status !== "any"
+  // Without this, `status = ?` was planned as a scan of every row for that user.
+  if (singleStatus) return " INDEXED BY idx_user_jobs_status"
+  if (Number(c.req.query("min_score") ?? 0) > 0) return " INDEXED BY idx_user_jobs_score"
+  return ""
+}
+
+export async function jobFilters(c: Ctx, withCompanies: boolean, anchored = false): Promise<Where> {
   const clauses = ["j.closed_at IS NULL", "j.duplicate_of IS NULL"]
   const binds: (string | number)[] = []
   const blocked = await excludeBlockedCompaniesForUser(c.env, currentUser(c).id, "j.company_key")
   clauses.push(blocked.sql)
   binds.push(...blocked.binds)
+  // A user_jobs row is always present on that path, and status itself is NOT NULL.
+  const statusExpr = anchored ? "uj.status" : "COALESCE(uj.status, 'new')"
 
   // Nothing is dropped from the list for good: the default view hides what the
   // prefilter and the user set aside, `any` brings the whole pile back.
   const status = c.req.query("status")
   if (status && status !== "any") {
-    clauses.push("COALESCE(uj.status, 'new') = ?")
+    clauses.push(`${statusExpr} = ?`)
     binds.push(status)
   } else if (!status) {
-    clauses.push("COALESCE(uj.status, 'new') NOT IN ('ignored', 'off_profile')")
+    clauses.push(`${statusExpr} NOT IN ('ignored', 'off_profile')`)
   }
 
   const minScore = Number(c.req.query("min_score") ?? 0)

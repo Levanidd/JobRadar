@@ -173,6 +173,10 @@ describe("jobs", () => {
     expect((await call("/api/jobs?viewed=yes")).body.jobs).toHaveLength(1)
 
     expect((await call("/api/jobs?min_score=90")).body.jobs).toHaveLength(0)
+    expect((await call("/api/jobs?min_score=50")).body.jobs).toHaveLength(1)
+    expect((await call("/api/jobs/companies?min_score=50&q=ac")).body.companies).toEqual([
+      expect.objectContaining({ company_key: "acme" }),
+    ])
     expect((await call("/api/jobs?companies=acme")).body.jobs).toHaveLength(1)
     expect((await call("/api/jobs?companies=other")).body.jobs).toHaveLength(0)
   })

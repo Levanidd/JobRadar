@@ -149,6 +149,7 @@ export function Jobs({
   const [nextOffset, setNextOffset] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const [companies, setCompanies] = useState<CompanyFacet[]>([])
+  const [companyHits, setCompanyHits] = useState<CompanyFacet[] | null>(null)
   const [card, setCard] = useState<Job | null>(null)
   const [scoring, setScoring] = useState<string | null>(null)
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
@@ -167,6 +168,8 @@ export function Jobs({
   const generation = useRef(0)
   const loadedCount = useRef(0)
   const moreLock = useRef(false)
+  const companyNames = useRef(new Map<string, string>())
+  const companySearch = useRef(0)
 
   const {
     status,
@@ -213,7 +216,55 @@ export function Jobs({
     setHasMore(more)
     setNextOffset(next)
     setLoadingMore(false)
-  }, [run, filters])
+    // The table is already scheduled. Companies are a second request and must not
+    // hold the first paint, or compete with it on D1.
+    const listed = await run(() =>
+      api.jobCompanies({
+        status,
+        min_score: minScore,
+        tier,
+        added_days: addedDays,
+        added_from: addedFrom,
+        source_id: sourceId,
+        viewed,
+        later,
+        applied,
+      }),
+    )
+    if (gen !== generation.current || !listed) return
+    for (const item of listed.companies) companyNames.current.set(item.company_key, item.company)
+    setCompanies(listed.companies)
+    setCompanyHits(null)
+  }, [run, filters, status, minScore, tier, addedDays, addedFrom, sourceId, viewed, later, applied])
+
+  const searchCompanies = useCallback((q: string) => {
+    const gen = ++companySearch.current
+    if (!q) {
+      setCompanyHits(null)
+      return
+    }
+    void (async () => {
+      const result = await run(() =>
+        api.jobCompanies(
+          {
+            status,
+            min_score: minScore,
+            tier,
+            added_days: addedDays,
+            added_from: addedFrom,
+            source_id: sourceId,
+            viewed,
+            later,
+            applied,
+          },
+          q,
+        ),
+      )
+      if (gen !== companySearch.current || !result) return
+      for (const item of result.companies) companyNames.current.set(item.company_key, item.company)
+      setCompanyHits(result.companies)
+    })()
+  }, [run, status, minScore, tier, addedDays, addedFrom, sourceId, viewed, later, applied])
 
   async function showMore() {
     if (moreLock.current || !hasMore) return
@@ -236,26 +287,6 @@ export function Jobs({
   }
 
   useLoader(load)
-
-  // The picker follows every filter except the company list itself.
-  const loadCompanies = useCallback(async () => {
-    const result = await run(() =>
-      api.jobCompanies({
-        status,
-        min_score: minScore,
-        tier,
-        added_days: addedDays,
-        added_from: addedFrom,
-        source_id: sourceId,
-        viewed,
-        later,
-        applied,
-      }),
-    )
-    if (result) setCompanies(result.companies)
-  }, [run, status, minScore, tier, addedDays, addedFrom, sourceId, viewed, later, applied])
-
-  useLoader(loadCompanies)
 
   /** A row the edit just pushed out of the filter should leave, as a refetch would drop it. */
   function stillMatches(job: Job): boolean {
@@ -557,12 +588,14 @@ export function Jobs({
 
         <MultiSelect
           label={t("All")}
-          options={companies.map((item) => ({
+          options={(companyHits ?? companies).map((item) => ({
             value: item.company_key,
             label: item.company,
             hint: String(item.jobs),
           }))}
           selected={picked}
+          labelOf={(value) => companyNames.current.get(value)}
+          onSearch={searchCompanies}
           onChange={(values) => setFilters((prev) => ({ ...prev, companies: values.length ? values : undefined }))}
         />
       </div>
