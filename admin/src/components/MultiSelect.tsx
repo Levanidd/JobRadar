@@ -9,13 +9,22 @@ type Props = {
   options: Option[]
   selected: string[]
   onChange: (values: string[]) => void
+  /** When set, typing asks the parent for options instead of filtering this list. */
+  onSearch?: (query: string) => void
+  labelOf?: (value: string) => string | undefined
 }
 
-export function MultiSelect({ label, options, selected, onChange }: Props) {
+export function MultiSelect({ label, options, selected, onChange, onSearch, labelOf }: Props) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const root = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!onSearch || !open) return
+    const id = window.setTimeout(() => onSearch(search.trim()), 200)
+    return () => window.clearTimeout(id)
+  }, [search, onSearch, open])
 
   useEffect(() => {
     if (!open) return
@@ -34,13 +43,13 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
   }, [open])
 
   const needle = search.trim().toLowerCase()
-  const visible = needle ? options.filter((item) => item.label.toLowerCase().includes(needle)) : options
+  const visible = onSearch || !needle ? options : options.filter((item) => item.label.toLowerCase().includes(needle))
 
   const title =
     selected.length === 0
       ? label
       : selected.length === 1
-        ? (options.find((item) => item.value === selected[0])?.label ?? `${label}: 1`)
+        ? (labelOf?.(selected[0]) ?? options.find((item) => item.value === selected[0])?.label ?? `${label}: 1`)
         : `${label}: ${selected.length}`
 
   function toggle(value: string) {

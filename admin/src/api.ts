@@ -217,8 +217,13 @@ export const api = {
     return request(`/jobs${jobQuery(filters)}`)
   },
 
-  jobCompanies(filters: JobFilters): Promise<{ companies: CompanyFacet[] }> {
-    return request(`/jobs/companies${jobQuery({ ...filters, companies: undefined, source_label: undefined, sort: undefined, dir: undefined })}`)
+  jobCompanies(filters: JobFilters, q?: string): Promise<{ companies: CompanyFacet[] }> {
+    const base = jobQuery({ ...filters, companies: undefined, source_label: undefined, sort: undefined, dir: undefined })
+    const params = new URLSearchParams(base.startsWith("?") ? base.slice(1) : "")
+    const needle = q?.trim()
+    if (needle) params.set("q", needle)
+    const query = params.toString()
+    return request(`/jobs/companies${query ? `?${query}` : ""}`)
   },
 
   setJobStatus(id: string, status: JobStatus): Promise<JobPatch> {

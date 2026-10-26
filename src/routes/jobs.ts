@@ -7,7 +7,7 @@ import { createManualJob, scoreJobsByIds, scoreOneJob, setPrimaryListing } from 
 import { backfillJobTexts, backfillTextHashes, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "../job-text"
 import { QuotaError } from "../quota"
 import type { AppEnv } from "../types"
-import { JOB_COLUMNS, JOB_SOURCE, appliedFilters, jobFilters, jobOrder } from "./job-query"
+import { JOB_COLUMNS, JOB_SOURCE, appliedFilters, jobFilters, jobOrder, jobsFromUser, userJobsHint } from "./job-query"
 
 export const jobs = new Hono<AppEnv>()
 
@@ -174,19 +174,28 @@ jobs.get("/api/jobs", async (c) => {
   const userId = currentUser(c).id
   const sourceScoped = Boolean(Number(c.req.query("source_id") ?? 0))
   const { limit, offset } = pageBounds(c.req.query("limit"), c.req.query("offset"))
-  const { clauses, binds } = await jobFilters(c, true)
-  const jobsHint = sourceScoped ? "" : " INDEXED BY idx_jobs_list_cover"
-  // The source table is only needed when the tier filter reads it. The default
-  // list orders by score, which lives on user_jobs.
+  const fromUser = jobsFromUser(c)
+  const { clauses, binds } = await jobFilters(c, true, fromUser)
+  // The source table is only needed when the tier filter reads it.
   const sourceJoin = c.req.query("tier") ? "JOIN sources s ON s.id = j.source_id" : ""
+  // A score, a verdict, or a "yes" mark means the row lives on user_jobs.
+  // Anything that still includes postings nobody has touched starts from jobs.
   const ordered = await c.env.DB.prepare(
-    `SELECT j.id
-     FROM jobs j${jobsHint}
-     ${sourceJoin}
-     LEFT JOIN user_jobs uj INDEXED BY idx_user_jobs_list ON uj.job_id = j.id AND uj.user_id = ?
-     WHERE ${clauses}
-     ORDER BY ${jobOrder(c)}
-     LIMIT ? OFFSET ?`,
+    fromUser
+      ? `SELECT j.id
+         FROM user_jobs uj${userJobsHint(c)}
+         CROSS JOIN jobs j ON j.id = uj.job_id
+         ${sourceJoin}
+         WHERE uj.user_id = ? AND ${clauses}
+         ORDER BY ${jobOrder(c)}
+         LIMIT ? OFFSET ?`
+      : `SELECT j.id
+         FROM jobs j${sourceScoped ? "" : " INDEXED BY idx_jobs_list_cover"}
+         ${sourceJoin}
+         LEFT JOIN user_jobs uj INDEXED BY idx_user_jobs_list ON uj.job_id = j.id AND uj.user_id = ?
+         WHERE ${clauses}
+         ORDER BY ${jobOrder(c)}
+         LIMIT ? OFFSET ?`,
   )
     .bind(userId, ...binds, limit, offset)
     .all<{ id: string }>()
@@ -235,15 +244,28 @@ jobs.post("/api/jobs/backfill-texts", async (c) => {
 
 jobs.get("/api/jobs/companies", async (c) => {
   const userId = currentUser(c).id
-  const { clauses, binds } = await jobFilters(c, false)
+  const fromUser = jobsFromUser(c)
+  const { clauses, binds } = await jobFilters(c, false, fromUser)
+  const q = (c.req.query("q") ?? "").trim().toLowerCase().replace(/[%_\\]/g, "").slice(0, 40)
+  const prefix = q ? ` AND j.company_key LIKE (? || '%')` : ""
+  const limit = q ? " LIMIT 20" : ""
+  const sourceJoin = "JOIN sources s ON s.id = j.source_id"
   const rows = await c.env.DB.prepare(
-    `SELECT j.company_key, MIN(j.company) AS company, COUNT(*) AS jobs
-     ${listedJobs(Boolean(Number(c.req.query("source_id") ?? 0)))}
-     WHERE ${clauses}
-     GROUP BY j.company_key
-     ORDER BY company COLLATE NOCASE`,
+    fromUser
+      ? `SELECT j.company_key, MIN(j.company) AS company, COUNT(*) AS jobs
+         FROM user_jobs uj${userJobsHint(c)}
+         CROSS JOIN jobs j ON j.id = uj.job_id
+         ${sourceJoin}
+         WHERE uj.user_id = ? AND ${clauses}${prefix}
+         GROUP BY j.company_key
+         ORDER BY company COLLATE NOCASE${limit}`
+      : `SELECT j.company_key, MIN(j.company) AS company, COUNT(*) AS jobs
+         ${listedJobs(Boolean(Number(c.req.query("source_id") ?? 0)))}
+         WHERE ${clauses}${prefix}
+         GROUP BY j.company_key
+         ORDER BY company COLLATE NOCASE${limit}`,
   )
-    .bind(userId, ...binds)
+    .bind(userId, ...binds, ...(q ? [q] : []))
     .all()
   return c.json({ companies: rows.results })
 })
