@@ -309,11 +309,13 @@ const poolCache = new WeakMap<object, Map<number, { at: number; pool: PoolEntry[
  */
 async function readPool(env: Bindings, userId: number): Promise<PoolEntry[]> {
   const rows = await env.DB.prepare(
-    `SELECT uj.job_id, uj.score, uj.status, j.url, COALESCE(length(j.description), 0) > 0 AS has_text
+    `SELECT uj.job_id, uj.score, uj.status, j.url, typeof(j.description) = 'text' AS has_text
      FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
      WHERE uj.user_id = ? AND uj.status IN (${placeholders(POOL_STATUSES.length)})
        AND uj.score IS NOT NULL AND COALESCE(uj.score_reason, '') <> 'prefilter'
-       AND j.duplicate_of IS NULL`,
+       AND j.duplicate_of IS NULL
+     ORDER BY uj.score DESC
+     LIMIT 5000`,
   )
     .bind(userId, ...POOL_STATUSES)
     .all<PoolRow>()

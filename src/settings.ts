@@ -169,7 +169,7 @@ export async function blockedCompanyKeys(env: Bindings): Promise<Set<string>> {
 export function sqlExcludeCompanyKeys(column: string, keys: string[]): { sql: string; binds: string[] } {
   if (keys.length === 0) return { sql: "1=1", binds: [] }
   return {
-    sql: `${column} NOT IN (${keys.map(() => "?").join(", ")})`,
+    sql: `(${column} IS NULL OR ${column} NOT IN (${keys.map(() => "?").join(", ")}))`,
     binds: keys,
   }
 }
@@ -189,7 +189,7 @@ export async function excludeBlockedCompanies(
 export async function listOpenCompanies(env: Bindings): Promise<BlacklistedCompany[]> {
   const rows = await env.DB.prepare(
     `SELECT company_key, MIN(company) AS company
-     FROM jobs
+     FROM jobs INDEXED BY idx_jobs_open_company_name
      WHERE closed_at IS NULL AND company_key IS NOT NULL AND company_key != ''
      GROUP BY company_key
      ORDER BY company COLLATE NOCASE`,

@@ -125,6 +125,39 @@ export async function markMissingClosed(env: Bindings, source: SourceRow, runSta
 const STALE_ARCHIVE_CHUNK = 80
 const STALE_ARCHIVE_PASSES = 40
 
+/**
+ * A primary that is about to leave must hand its closed copies to one heir.
+ * Nulling every duplicate_of would turn each copy into its own opening.
+ * Live copies keep the primary here for this pass.
+ */
+async function retargetClosedCopies(env: Bindings, parentIds: string[]): Promise<D1PreparedStatement[]> {
+  if (parentIds.length === 0) return []
+  const children = await env.DB.prepare(
+    `SELECT id, duplicate_of, first_seen_at FROM jobs
+     WHERE duplicate_of IN (${placeholders(parentIds.length)})
+     ORDER BY first_seen_at, id`,
+  )
+    .bind(...parentIds)
+    .all<{ id: string; duplicate_of: string; first_seen_at: string }>()
+  const groups = new Map<string, string[]>()
+  for (const child of children.results) {
+    const list = groups.get(child.duplicate_of) ?? []
+    list.push(child.id)
+    groups.set(child.duplicate_of, list)
+  }
+  const writes: D1PreparedStatement[] = []
+  for (const [parent, ids] of groups) {
+    const heir = ids[0]
+    writes.push(env.DB.prepare(`UPDATE jobs SET duplicate_of = NULL WHERE id = ?`).bind(heir))
+    if (ids.length > 1) {
+      writes.push(
+        env.DB.prepare(`UPDATE jobs SET duplicate_of = ? WHERE duplicate_of = ? AND id != ?`).bind(heir, parent, heir),
+      )
+    }
+  }
+  return writes
+}
+
 /** Anything a person attached, or an application, keeps the posting in the live list. */
 const WORTH_KEEPING = `uj.applied_at IS NOT NULL OR uj.interviewed_at IS NOT NULL
   OR uj.status IN ('applied', 'interview')
@@ -142,11 +175,14 @@ export async function archiveStaleSearchBoardJobs(env: Bindings, source: SourceR
   let moved = 0
   for (let pass = 0; pass < STALE_ARCHIVE_PASSES; pass += 1) {
     const picked = await env.DB.prepare(
-      `SELECT j.id FROM jobs j
+      `SELECT j.id FROM jobs j INDEXED BY idx_jobs_source_closed
        WHERE j.source_id = ? AND j.closed_at IS NOT NULL AND j.closed_at < datetime('now', ?)
          AND j.applied_at IS NULL AND TRIM(COALESCE(j.notes, '')) = ''
          AND NOT EXISTS (
            SELECT 1 FROM user_jobs uj WHERE uj.job_id = j.id AND (${WORTH_KEEPING})
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM jobs live WHERE live.duplicate_of = j.id AND live.closed_at IS NULL
          )
        LIMIT ?`,
     )
@@ -155,6 +191,7 @@ export async function archiveStaleSearchBoardJobs(env: Bindings, source: SourceR
     const ids = picked.results.map((row) => row.id)
     if (ids.length === 0) break
     const marks = placeholders(ids.length)
+    const heirs = await retargetClosedCopies(env, ids)
     await runBatch(env, [
       env.DB.prepare(
         `INSERT OR REPLACE INTO archive_jobs (
@@ -192,7 +229,7 @@ export async function archiveStaleSearchBoardJobs(env: Bindings, source: SourceR
          SELECT id, user_id, job_id, title, happened_on, created_at, datetime('now')
          FROM interview_stages WHERE job_id IN (${marks})`,
       ).bind(...ids),
-      env.DB.prepare(`UPDATE jobs SET duplicate_of = NULL WHERE duplicate_of IN (${marks})`).bind(...ids),
+      ...heirs,
       env.DB.prepare(`DELETE FROM jobs WHERE id IN (${marks})`).bind(...ids),
     ])
     moved += ids.length
@@ -648,7 +685,7 @@ type Candidate = {
   title: string
   location: string | null
   url: string
-  description: string | null
+  no_text: number
   dedup_key: string | null
 }
 
@@ -684,8 +721,10 @@ async function inheritVerdicts(
   for (const part of chunk(keys, 80)) {
     const rows = await env.DB.prepare(
       `SELECT j.dedup_key, MAX(uj.score) AS score, uj.score_reason, uj.flags
-       FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
-       WHERE uj.user_id = ? AND uj.score IS NOT NULL AND j.dedup_key IN (${placeholders(part.length)})
+       FROM jobs j INDEXED BY idx_jobs_dedup
+       JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+       WHERE j.dedup_key IN (${placeholders(part.length)}) AND uj.score IS NOT NULL
+         AND COALESCE(uj.score_reason, '') <> 'prefilter'
        GROUP BY j.dedup_key`,
     )
       .bind(userId, ...part)
@@ -746,8 +785,9 @@ export async function prefilterAndScore(
   const blocked = await excludeBlockedCompaniesForUser(env, userId, "j.company_key")
 
   const open = await env.DB.prepare(
-    `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, j.description, j.dedup_key
-     FROM jobs j
+    `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, j.dedup_key,
+            typeof(j.description) = 'null' AS no_text
+     FROM jobs j INDEXED BY idx_jobs_live
      LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.closed_at IS NULL AND j.duplicate_of IS NULL AND uj.score IS NULL
        AND COALESCE(uj.status, 'new') NOT IN ('ignored', 'rejected', 'off_profile')
@@ -780,7 +820,7 @@ export async function prefilterAndScore(
     const key = job.dedup_key
     // A row scored from the title alone has to be judged again once its
     // posting body is available. Inheriting that old verdict would skip it.
-    const needsText = !job.description && bodyComesLater(job.url)
+    const needsText = Boolean(job.no_text) && bodyComesLater(job.url)
     if (key && !needsText) {
       const known = verdicts.get(key)
       if (known) {
@@ -880,6 +920,10 @@ export async function prefilterAndScore(
  * A brand-new source arrives with its whole backlog, which would make one huge
  * digest. Mark it as already delivered rather than ignored, so it still shows up
  * in the admin.
+ *
+ * bootstrapped is one flag on the source, not per person. The first user whose
+ * scoring pass sees the source marks it delivered for everyone. That is enough
+ * while a single master owns the run.
  */
 async function bootstrapColdSources(env: Bindings, userId: number): Promise<void> {
   const cold = await env.DB.prepare(
@@ -891,7 +935,7 @@ async function bootstrapColdSources(env: Bindings, userId: number): Promise<void
       env.DB.prepare(
         `INSERT INTO user_jobs (user_id, job_id, status, notified_at)
          SELECT ?, j.id, COALESCE(uj.status, 'new'), datetime('now')
-         FROM jobs j
+         FROM jobs j INDEXED BY idx_jobs_source_seen
          LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
          WHERE j.source_id = ? AND j.duplicate_of IS NULL
            AND COALESCE(uj.status, 'new') = 'new' AND uj.notified_at IS NULL
@@ -912,22 +956,33 @@ export async function reapplyPrefilter(
   userId: number,
 ): Promise<{ dropped: number; restored: number }> {
   const rules = await resolveUserPrefilter(env, userId)
-  const rows = await env.DB.prepare(
-    `SELECT j.id, j.title, COALESCE(uj.status, 'new') AS status
-     FROM jobs j
-     LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
-     WHERE j.closed_at IS NULL AND j.duplicate_of IS NULL
-       AND COALESCE(uj.status, 'new') IN ('new', 'notified', 'off_profile')`,
-  )
-    .bind(userId)
-    .all<{ id: string; title: string; status: string }>()
-
   const drop: string[] = []
   const restore: string[] = []
-  for (const row of rows.results) {
-    const pass = passesPrefilter(row.title, rules)
-    if (!pass && row.status !== "off_profile") drop.push(row.id)
-    else if (pass && row.status === "off_profile") restore.push(row.id)
+  let seen = ""
+  let afterId = ""
+  for (;;) {
+    const rows = await env.DB.prepare(
+      `SELECT j.id, j.title, j.first_seen_at, COALESCE(uj.status, 'new') AS status
+       FROM jobs j INDEXED BY idx_jobs_live
+       LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+       WHERE j.closed_at IS NULL AND j.duplicate_of IS NULL
+         AND COALESCE(uj.status, 'new') IN ('new', 'notified', 'off_profile')
+         AND (j.first_seen_at > ? OR (j.first_seen_at = ? AND j.id > ?))
+       ORDER BY j.first_seen_at, j.id
+       LIMIT 500`,
+    )
+      .bind(userId, seen, seen, afterId)
+      .all<{ id: string; title: string; first_seen_at: string; status: string }>()
+    if (rows.results.length === 0) break
+    for (const row of rows.results) {
+      const pass = passesPrefilter(row.title, rules)
+      if (!pass && row.status !== "off_profile") drop.push(row.id)
+      else if (pass && row.status === "off_profile") restore.push(row.id)
+    }
+    const last = rows.results[rows.results.length - 1]
+    seen = last.first_seen_at
+    afterId = last.id
+    if (rows.results.length < 500) break
   }
 
   await runBatch(env, [

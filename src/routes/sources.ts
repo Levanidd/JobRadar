@@ -19,11 +19,16 @@ sources.get("/api/sources", async (c) => {
        COALESCE(r.ok, CASE WHEN j.source_id IS NOT NULL THEN 1 END) AS last_ok
      FROM sources s
      LEFT JOIN (
-       SELECT source_id,
-         SUM(CASE WHEN closed_at IS NULL THEN 1 ELSE 0 END) AS active_jobs,
-         MAX(last_seen_at) AS last_seen_at
-       FROM jobs
-       GROUP BY source_id
+       SELECT s2.id AS source_id,
+         (
+           SELECT COUNT(*) FROM jobs INDEXED BY idx_jobs_open_source
+           WHERE source_id = s2.id AND closed_at IS NULL
+         ) AS active_jobs,
+         (
+           SELECT MAX(last_seen_at) FROM jobs INDEXED BY idx_jobs_source_seen
+           WHERE source_id = s2.id
+         ) AS last_seen_at
+       FROM sources s2
      ) j ON j.source_id = s.id
      LEFT JOIN (
        SELECT r.source_id, r.error, r.ok

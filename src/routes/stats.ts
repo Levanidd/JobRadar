@@ -121,7 +121,7 @@ stats.get("/api/stats", async (c) => {
   const blocked = await excludeBlockedCompaniesForUser(c.env, userId, "j.company_key")
   const where = `${blocked.sql} AND j.duplicate_of IS NULL`
   const binds = [userId, ...blocked.binds]
-  const join = `FROM jobs j LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?`
+  const join = `FROM jobs j INDEXED BY idx_jobs_primary LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?`
 
   // A period narrows each number to the events that fall inside it, and every
   // number has its own event: a job counts as found when we first saw it, as

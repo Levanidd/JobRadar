@@ -307,6 +307,43 @@ describe("jobs", () => {
     expect((await call("/api/jobs")).body.jobs).toHaveLength(1)
   })
 
+  it("writes an application on a duplicate onto the primary listing", async () => {
+    const primaryId = await seedJob()
+    await env.DB.prepare(
+      `INSERT INTO sources (kind, tier, label, provider, token) VALUES ('query', 'discovery', 'Arbeitnow', 'arbeitnow', 'product')`,
+    ).run()
+    const query = await one<SourceRow>(env, `SELECT * FROM sources WHERE provider = 'arbeitnow'`)
+    await upsertJobs(
+      env,
+      query!,
+      [
+        {
+          externalId: "9",
+          title: "Senior Product Manager",
+          company: "Acme GmbH",
+          url: "https://www.arbeitnow.com/jobs/acme-spm",
+          location: "Berlin",
+        },
+      ],
+      new Set(),
+    )
+    const copy = await one<{ id: string }>(
+      env,
+      `SELECT id FROM jobs WHERE url = 'https://www.arbeitnow.com/jobs/acme-spm'`,
+    )
+
+    const patched = await call(`/api/jobs/${copy!.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "applied" }),
+    })
+    expect(patched.status).toBe(200)
+    expect(patched.body.applied_at).toBeTruthy()
+
+    const applied = await call("/api/applied")
+    expect(applied.body.jobs).toHaveLength(1)
+    expect(applied.body.jobs[0].id).toBe(primaryId)
+  })
+
   it("hides duplicate listings until a person picks one as primary", async () => {
     const primaryId = await seedJob()
     await env.DB.prepare(

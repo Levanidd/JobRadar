@@ -147,12 +147,19 @@ jobs.post("/api/applied", async (c) => {
   }
 })
 
+function listedJobs(sourceScoped: boolean): string {
+  const hint = sourceScoped ? "" : " INDEXED BY idx_jobs_live"
+  return `FROM jobs j${hint}
+  JOIN sources s ON s.id = j.source_id
+  LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?`
+}
+
 jobs.get("/api/jobs", async (c) => {
   const userId = currentUser(c).id
   const { clauses, binds } = await jobFilters(c, true)
   const rows = await c.env.DB.prepare(
     `SELECT ${JOB_COLUMNS}, s.tier, s.label as source_label
-     ${JOB_SOURCE}
+     ${listedJobs(Boolean(Number(c.req.query("source_id") ?? 0)))}
      WHERE ${clauses}
      ORDER BY ${jobOrder(c)}
      LIMIT 500`,
@@ -167,7 +174,7 @@ jobs.get("/api/jobs/companies", async (c) => {
   const { clauses, binds } = await jobFilters(c, false)
   const rows = await c.env.DB.prepare(
     `SELECT j.company_key, MIN(j.company) AS company, COUNT(*) AS jobs
-     ${JOB_SOURCE}
+     ${listedJobs(Boolean(Number(c.req.query("source_id") ?? 0)))}
      WHERE ${clauses}
      GROUP BY j.company_key
      ORDER BY company COLLATE NOCASE`,
@@ -224,10 +231,13 @@ jobs.patch("/api/jobs/:id", async (c) => {
     return c.json({ error: "nothing to update" }, 400)
   }
 
-  const exists = await c.env.DB.prepare(`SELECT id FROM jobs WHERE id = ?`).bind(id).first<{ id: string }>()
-  if (!exists) return c.json({ error: "not found" }, 404)
+  const root = await c.env.DB.prepare(`SELECT COALESCE(duplicate_of, id) AS id FROM jobs WHERE id = ?`)
+    .bind(id)
+    .first<{ id: string }>()
+  if (!root) return c.json({ error: "not found" }, 404)
+  const jobId = root.id
 
-  await c.env.DB.prepare(`INSERT OR IGNORE INTO user_jobs (user_id, job_id) VALUES (?, ?)`).bind(userId, id).run()
+  await c.env.DB.prepare(`INSERT OR IGNORE INTO user_jobs (user_id, job_id) VALUES (?, ?)`).bind(userId, jobId).run()
 
   const sets: string[] = []
   const binds: (string | null)[] = []
@@ -263,14 +273,14 @@ jobs.patch("/api/jobs/:id", async (c) => {
   }
 
   await c.env.DB.prepare(`UPDATE user_jobs SET ${sets.join(", ")} WHERE user_id = ? AND job_id = ?`)
-    .bind(...binds, userId, id)
+    .bind(...binds, userId, jobId)
     .run()
 
   const row = await c.env.DB.prepare(
     `SELECT status, notes, applied_at, viewed_at, later_at, interviewed_at, cv_url, claude_comment
      FROM user_jobs WHERE user_id = ? AND job_id = ?`,
   )
-    .bind(userId, id)
+    .bind(userId, jobId)
     .first<{
       status: string
       notes: string | null

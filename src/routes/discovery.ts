@@ -71,13 +71,14 @@ discovery.get("/api/explore", async (c) => {
 
   const rows = await c.env.DB.prepare(
     `WITH ranked AS (
-       SELECT j.company_key, j.company, j.url, j.score, s.provider,
+       SELECT j.company_key, j.company, j.url, uj.score, s.provider,
          ROW_NUMBER() OVER (
            PARTITION BY j.company_key
-           ORDER BY j.score DESC NULLS LAST, j.first_seen_at DESC
+           ORDER BY uj.score DESC NULLS LAST, j.first_seen_at DESC
          ) AS rn
        FROM jobs j
        JOIN sources s ON s.id = j.source_id
+       LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
        WHERE j.closed_at IS NULL AND s.kind = 'query' AND s.deleted_at IS NULL
          AND s.provider IN (${placeholders(providers.length)})
          AND j.company_key IS NOT NULL AND j.company_key != ''
@@ -93,7 +94,7 @@ discovery.get("/api/explore", async (c) => {
      ORDER BY best_score DESC NULLS LAST, jobs DESC
      LIMIT 800`,
   )
-    .bind(...providers)
+    .bind(currentUser(c).id, ...providers)
     .all<{ company_key: string }>()
 
   // Explore is a suggestion list: an employer we already follow or already
@@ -112,11 +113,12 @@ discovery.post("/api/explore/:key/add", async (c) => {
   const key = c.req.param("key")
   const row = await c.env.DB.prepare(
     `SELECT j.company, j.url FROM jobs j
+     LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.company_key = ? AND j.closed_at IS NULL
-     ORDER BY j.score DESC NULLS LAST, j.first_seen_at DESC
+     ORDER BY uj.score DESC NULLS LAST, j.first_seen_at DESC
      LIMIT 1`,
   )
-    .bind(key)
+    .bind(currentUser(c).id, key)
     .first<{ company: string; url: string }>()
   if (!row) return c.json({ error: "not found" }, 404)
   return c.json(await trackCompany(c.env, key, row.company, row.url))

@@ -372,6 +372,35 @@ describe("prefilterAndScore", () => {
     expect(stored?.score).toBeGreaterThan(0)
   })
 
+  it("does not inherit a prefilter zero onto a posting that passes", async () => {
+    const source = await addSource()
+    await upsertJobs(env, source, [job({ title: "Backend Engineer" })], new Set())
+    await prefilterAndScore(env, TEST_USER_ID)
+    const parked = await one<{ id: string; dedup_key: string }>(env, `SELECT id, dedup_key FROM jobs`)
+    await env.DB.prepare(`UPDATE jobs SET closed_at = datetime('now') WHERE id = ?`).bind(parked!.id).run()
+    await env.DB.prepare(
+      `INSERT INTO jobs (
+         id, source_id, external_id, company, company_key, title, url, description, dedup_key, status,
+         first_seen_at, last_seen_at
+       )
+       SELECT 'j-open', source_id, 'open', company, company_key, 'Senior Product Manager',
+              'https://acme.example/jobs/open', description, dedup_key, 'new', datetime('now'), datetime('now')
+       FROM jobs WHERE id = ?`,
+    )
+      .bind(parked!.id)
+      .run()
+
+    const step = await prefilterAndScore(env, TEST_USER_ID)
+    expect(step.scored).toBe(1)
+    const fresh = await one<{ score: number; score_reason: string }>(
+      env,
+      `SELECT score, score_reason FROM user_jobs WHERE user_id = ? AND job_id = 'j-open'`,
+      TEST_USER_ID,
+    )
+    expect(fresh?.score_reason).not.toBe("prefilter")
+    expect(fresh?.score).toBeGreaterThan(0)
+  })
+
   it("reuses a verdict across boards that carry the same opening", async () => {
     const company = await addSource()
     await upsertJobs(env, company, [job()], new Set())

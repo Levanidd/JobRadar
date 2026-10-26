@@ -72,14 +72,32 @@ export async function resetAndScore(
   env: Bindings,
   userId: number,
 ): Promise<{ ok: true; scored: number; limited: boolean }> {
-  await env.DB.prepare(
-    `UPDATE user_jobs SET score = NULL, score_reason = NULL, flags = NULL
-     WHERE user_id = ? AND job_id IN (
-       SELECT id FROM jobs WHERE closed_at IS NULL
-     ) AND COALESCE(status, 'new') NOT IN ('ignored', 'rejected', 'off_profile')`,
-  )
-    .bind(userId)
-    .run()
+  let seen = ""
+  let afterId = ""
+  for (;;) {
+    const page = await env.DB.prepare(
+      `SELECT id, first_seen_at FROM jobs INDEXED BY idx_jobs_live
+       WHERE closed_at IS NULL AND duplicate_of IS NULL
+         AND (first_seen_at > ? OR (first_seen_at = ? AND id > ?))
+       ORDER BY first_seen_at, id
+       LIMIT 500`,
+    )
+      .bind(seen, seen, afterId)
+      .all<{ id: string; first_seen_at: string }>()
+    if (page.results.length === 0) break
+    const ids = page.results.map((row) => row.id)
+    await env.DB.prepare(
+      `UPDATE user_jobs SET score = NULL, score_reason = NULL, flags = NULL
+       WHERE user_id = ? AND job_id IN (${ids.map(() => "?").join(", ")})
+         AND COALESCE(status, 'new') NOT IN ('ignored', 'rejected', 'off_profile')`,
+    )
+      .bind(userId, ...ids)
+      .run()
+    const last = page.results[page.results.length - 1]
+    seen = last.first_seen_at
+    afterId = last.id
+    if (page.results.length < 500) break
+  }
   const { scored, limited } = await prefilterAndScore(env, userId, undefined, {
     kind: "rescore",
     userId,
