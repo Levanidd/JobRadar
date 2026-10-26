@@ -65,6 +65,36 @@ describe("adapter parsers", () => {
     expect(jobs[0]?.url).toContain("ashbyhq.com")
   })
 
+  it("keeps every Ashby city and the workplace, without splitting the dedup key", () => {
+    const title = "Senior Product Manager - Business Banking"
+    const [job] = parseAshby({
+      jobs: [
+        {
+          id: "9c3e0b6f-ce76-4bd7-9144-cabce7d5b555",
+          title,
+          jobUrl: "https://jobs.ashbyhq.com/mollie/9c3e0b6f-ce76-4bd7-9144-cabce7d5b555",
+          location: "Milan",
+          secondaryLocations: [{ location: "Amsterdam" }, { location: "Berlin" }, { location: "Milan" }],
+          workplaceType: "Hybrid",
+        },
+      ],
+    })
+    expect(job?.location).toBe("Milan; Amsterdam; Berlin (Hybrid)")
+    // The opening is company + title. A longer location must not mint a second job.
+    expect(dedupKey("Mollie", title)).toBe("mollie|senior product manager business banking")
+    expect(dedupKey("Mollie", title)).not.toContain("berlin")
+
+    const [plain] = parseAshby({
+      jobs: [{ id: "1", title: "PM", jobUrl: "https://jobs.ashbyhq.com/acme/1", location: "Berlin" }],
+    })
+    expect(plain?.location).toBe("Berlin")
+
+    const [remote] = parseAshby({
+      jobs: [{ id: "2", title: "PM", jobUrl: "https://jobs.ashbyhq.com/acme/2", isRemote: true }],
+    })
+    expect(remote?.location).toBe("Remote")
+  })
+
   it("parses lever postings", () => {
     const jobs = parseLever(JSON.parse(load("lever.json")), "palantir")
     expect(jobs[0]?.title).toBe("Administrative Business Partner")

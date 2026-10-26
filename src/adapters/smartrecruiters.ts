@@ -1,5 +1,6 @@
 import { asArray, asRecord, fetchJson, str } from "../http"
 import type { Adapter, RawJob } from "../types"
+import { formatLocation } from "./location"
 
 export function parseSmartRecruiters(payload: unknown): RawJob[] {
   const root = asRecord(payload)
@@ -13,12 +14,17 @@ export function parseSmartRecruiters(payload: unknown): RawJob[] {
     const identifier = str(company?.identifier) ?? "company"
     if (!id || !title) continue
     const loc = asRecord(row.location)
-    const location = str(loc?.fullLocation) ?? [str(loc?.city), str(loc?.country)].filter(Boolean).join(", ")
+    const primary = str(loc?.fullLocation) ?? [str(loc?.city), str(loc?.country)].filter(Boolean).join(", ")
+    const extra = asArray(row.locations).map((item) => {
+      const place = asRecord(item)
+      return str(place?.fullLocation) ?? [str(place?.city), str(place?.country)].filter(Boolean).join(", ")
+    })
+    const location = formatLocation([primary, ...extra], { remote: loc?.remote === true })
     jobs.push({
       externalId: id,
       title,
       company: str(company?.name),
-      location: location || undefined,
+      location,
       url: `https://jobs.smartrecruiters.com/${identifier}/${id}`,
       postedAt: str(row.releasedDate),
     })

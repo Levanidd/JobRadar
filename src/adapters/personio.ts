@@ -3,8 +3,14 @@ import { XMLParser } from "fast-xml-parser"
 import { asArray, asRecord, fetchJson, fetchText, str, type HttpError } from "../http"
 import { clipDescription } from "../prefilter"
 import type { Adapter, RawJob } from "../types"
+import { formatLocation } from "./location"
 
 const parser = new XMLParser({ ignoreAttributes: false, cdataPropName: "__cdata" })
+
+function officesOf(value: unknown): Array<string | undefined> {
+  if (Array.isArray(value)) return value.flatMap((item) => officesOf(item))
+  return [textOf(value) ?? str(value)]
+}
 
 function textOf(value: unknown): string | undefined {
   if (typeof value === "string") return value
@@ -39,7 +45,7 @@ export function parsePersonio(xml: string, fallbackCompany?: string): RawJob[] {
       externalId: id,
       title,
       company: fallbackCompany,
-      location: textOf(row.office) ?? str(row.office),
+      location: formatLocation(officesOf(row.offices ?? row.office)),
       url: `https://${fallbackCompany ?? "board"}.jobs.personio.de/job/${id}`,
       description: clipDescription(description),
       postedAt: str(row.createdAt),

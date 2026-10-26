@@ -2,6 +2,7 @@ import { asArray, asRecord, fetchJson, str } from "../http"
 import { clipDescription } from "../prefilter"
 import { toSalary } from "../salary"
 import type { Adapter, RawJob, Salary } from "../types"
+import { formatLocation } from "./location"
 
 function ashbySalary(row: Record<string, unknown>): Salary | undefined {
   const compensation = asRecord(row.compensation)
@@ -36,7 +37,14 @@ export function parseAshby(payload: unknown, fallbackCompany?: string): RawJob[]
     const title = str(row.title)
     const url = str(row.jobUrl) ?? str(row.applyUrl)
     if (!id || !title || !url) continue
-    const location = str(row.location) ?? (row.isRemote === true ? "Remote" : undefined)
+    const secondary = asArray(row.secondaryLocations).map((item) => {
+      const place = asRecord(item)
+      return str(place?.location) ?? str(item)
+    })
+    const location = formatLocation([str(row.location), ...secondary], {
+      workplace: str(row.workplaceType),
+      remote: row.isRemote === true,
+    })
     jobs.push({
       externalId: id,
       title,

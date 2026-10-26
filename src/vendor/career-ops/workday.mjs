@@ -128,6 +128,32 @@ function locationFromPath(externalPath) {
   return segment.replace(/-/g, ' ');
 }
 
+// The listing usually puts every city in locationsText. Some tenants also
+// send additionalLocations / secondaryLocations beside it; fold those in
+// so a second city is not dropped. Order kept, repeats dropped.
+function workdayPlaces(posting) {
+  const chunks = [];
+  const push = (value) => {
+    if (typeof value === 'string' && value.trim()) chunks.push(value.trim());
+    else if (Array.isArray(value)) value.forEach(push);
+    else if (value && typeof value === 'object') {
+      push(value.location || value.descriptor || value.name || value.locationsText || '');
+    }
+  };
+  push(posting?.locationsText);
+  push(posting?.additionalLocations);
+  push(posting?.secondaryLocations);
+  const seen = new Set();
+  const ordered = [];
+  for (const place of chunks) {
+    const key = place.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ordered.push(place);
+  }
+  return ordered.join('; ');
+}
+
 export function parseWorkdayResponse(json, entry) {
   const ep = resolveEndpoint(entry);
   const jobBase = ep?.jobBase || '';
@@ -140,7 +166,7 @@ export function parseWorkdayResponse(json, entry) {
       title: j.title || '',
       url: jobBase + j.externalPath,
       company: entry.name,
-      location: j.locationsText || locationFromPath(j.externalPath),
+      location: workdayPlaces(j) || locationFromPath(j.externalPath),
       postedAt: parsePostedOn(j.postedOn),
     });
   }

@@ -2,6 +2,7 @@ import { asArray, asRecord, fetchJson, str } from "../http"
 import { clipDescription } from "../prefilter"
 import { toSalary } from "../salary"
 import type { Adapter, RawJob } from "../types"
+import { formatLocation } from "./location"
 
 export function parseLever(payload: unknown, fallbackCompany?: string): RawJob[] {
   const jobs: RawJob[] = []
@@ -13,13 +14,17 @@ export function parseLever(payload: unknown, fallbackCompany?: string): RawJob[]
     const url = str(row.hostedUrl) ?? str(row.applyUrl)
     if (!id || !title || !url) continue
     const categories = asRecord(row.categories)
+    const extra = asArray(categories?.allLocations).map((item) => str(item))
+    const location = formatLocation([str(categories?.location), ...extra], {
+      workplace: str(categories?.workplaceType),
+    })
     const created = row.createdAt
     const range = asRecord(row.salaryRange)
     jobs.push({
       externalId: id,
       title,
       company: fallbackCompany,
-      location: str(categories?.location),
+      location,
       url,
       description: clipDescription(str(row.descriptionPlain) ?? str(row.description)),
       postedAt: typeof created === "number" ? new Date(created).toISOString() : str(created),

@@ -2,6 +2,7 @@ import { asArray, asRecord, fetchJson, str } from "../http"
 import { clipDescription } from "../prefilter"
 import { toSalary } from "../salary"
 import type { Adapter, RawJob, Salary } from "../types"
+import { formatLocation } from "./location"
 
 function greenhouseSalary(row: Record<string, unknown>): Salary | undefined {
   for (const item of asArray(row.pay_input_ranges)) {
@@ -30,11 +31,12 @@ export function parseGreenhouse(payload: unknown, fallbackCompany?: string): Raw
     const url = str(row.absolute_url)
     if (!id || !title || !url) continue
     const loc = asRecord(row.location)
+    const offices = asArray(row.offices).map((office) => str(asRecord(office)?.name) ?? str(office))
     jobs.push({
       externalId: id,
       title,
       company: str(row.company_name) ?? fallbackCompany,
-      location: str(loc?.name),
+      location: formatLocation([str(loc?.name), ...offices]),
       url,
       description: clipDescription(str(row.content)),
       postedAt: str(row.updated_at) ?? str(row.first_published),

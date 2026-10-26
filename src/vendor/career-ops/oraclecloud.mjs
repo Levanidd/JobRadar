@@ -162,15 +162,28 @@ export function buildJobUrl(site, id) {
  * from WorkplaceTypeCode. Returns "" when nothing is available.
  * @param {any} req
  */
+function placeName(loc) {
+  if (typeof loc === 'string') return loc.trim();
+  if (!loc || typeof loc !== 'object') return '';
+  const parts = [loc.TownOrCity, loc.Region, loc.Country].filter((v) => typeof v === 'string' && v.trim());
+  if (parts.length) return parts.join(', ');
+  return typeof loc.Name === 'string' ? loc.Name.trim() : '';
+}
+
 function assembleLocation(req) {
-  let base = typeof req.PrimaryLocation === 'string' ? req.PrimaryLocation.trim() : '';
-  if (!base && Array.isArray(req.workLocation) && req.workLocation.length) {
-    const wl = req.workLocation[0] || {};
-    base = [wl.TownOrCity, wl.Region, wl.Country].filter((v) => typeof v === 'string' && v.trim()).join(', ');
-  }
+  const places = [];
+  const push = (value) => {
+    const place = typeof value === 'string' ? value.trim() : placeName(value);
+    if (!place) return;
+    if (places.some((item) => item.toLowerCase() === place.toLowerCase())) return;
+    places.push(place);
+  };
+  push(req.PrimaryLocation);
+  if (!places.length && Array.isArray(req.workLocation)) push(req.workLocation[0]);
+  if (Array.isArray(req.secondaryLocations)) req.secondaryLocations.forEach(push);
   const wt = req.WorkplaceTypeCode;
   const remoteHint = wt === 'ORA_REMOTE' ? 'Remote' : wt === 'ORA_HYBRID' ? 'Hybrid' : '';
-  return [base, remoteHint].filter(Boolean).join(' · ');
+  return [places.join('; '), remoteHint].filter(Boolean).join(' · ');
 }
 
 /**
