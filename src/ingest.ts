@@ -1010,32 +1010,56 @@ export async function prefilterAndScore(
             if (!event.rateLimited && !event.fatal) await noteScoringProgress(0, ids.length)
             return
           }
-          const writes: D1PreparedStatement[] = []
+          const allowed = new Set(ids)
+          const seen = new Set<string>()
+          const valid: typeof event.scores = []
+          const foreign: string[] = []
           for (const item of event.scores) {
+            if (!allowed.has(item.external_id)) {
+              foreign.push(item.external_id)
+              continue
+            }
+            if (seen.has(item.external_id)) continue
+            seen.add(item.external_id)
+            valid.push(item)
+          }
+          if (foreign.length > 0) {
+            console.warn(`scoring ignored ${foreign.length} ids outside the batch: ${foreign.join(", ")}`)
+          }
+          const writes: D1PreparedStatement[] = []
+          for (const item of valid) {
             const verdict = { score: item.score, score_reason: item.reason, flags: JSON.stringify(item.flags) }
             writes.push(verdictUpdate(env, userId, item.external_id, verdict))
-            const scored = byId.get(item.external_id)
-            if (!scored) continue
-            for (const twin of (scored.dedup_key && awaiting.get(scored.dedup_key)) || []) {
+            const scoredJob = byId.get(item.external_id)
+            if (!scoredJob) continue
+            for (const twin of (scoredJob.dedup_key && awaiting.get(scoredJob.dedup_key)) || []) {
               writes.push(verdictUpdate(env, userId, twin, verdict))
             }
-            if (scored.company_key) {
+            if (scoredJob.company_key) {
               writes.push(
                 env.DB.prepare(
                   `UPDATE discovered_companies
                    SET best_score = CASE WHEN best_score IS NULL OR best_score < ? THEN ? ELSE best_score END
                    WHERE company_key = ?`,
-                ).bind(item.score, item.score, scored.company_key),
+                ).bind(item.score, item.score, scoredJob.company_key),
               )
             }
           }
-          writes.push(
-            env.DB.prepare(
-              `UPDATE cycles SET scored = scored + ?, updated_at = datetime('now')
-               WHERE id = 1 AND status = 'running' AND user_id = ?`,
-            ).bind(event.scores.length, userId),
-          )
+          if (valid.length > 0) {
+            writes.push(
+              env.DB.prepare(
+                `UPDATE cycles SET scored = scored + ?, updated_at = datetime('now')
+                 WHERE id = 1 AND status = 'running' AND user_id = ?`,
+              ).bind(valid.length, userId),
+            )
+          }
           await runBatch(env, writes)
+          const returned = new Set(valid.map((item) => item.external_id))
+          const missing = ids.filter((id) => !returned.has(id))
+          if (missing.length > 0) {
+            await releaseClaim(missing, true)
+            await noteScoringProgress(0, missing.length)
+          }
           },
         },
       ),

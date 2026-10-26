@@ -551,6 +551,179 @@ describe("prefilterAndScore", () => {
   })
 })
 
+describe("partial model replies", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  function reply(scores: Array<{ external_id: string; score: number; reason: string; flags: string[] }>) {
+    return new Response(
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: JSON.stringify({ scores }) }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 4, thoughtsTokenCount: 0 },
+      }),
+    )
+  }
+
+  function sentIds(init: RequestInit): string[] {
+    const body = JSON.parse(String(init.body)) as { contents: Array<{ parts: Array<{ text: string }> }> }
+    return [...body.contents[0].parts[0].text.matchAll(/external_id: (\S+)/g)].map((match) => match[1]!)
+  }
+
+  async function runningCycle() {
+    env = testEnv({ GEMINI_API_KEY: "key" })
+    await env.DB.prepare(
+      `UPDATE cycles SET status = 'running', phase = 'scoring', user_id = ?, scored = 0, failed_scoring = 0 WHERE id = 1`,
+    )
+      .bind(TEST_USER_ID)
+      .run()
+  }
+
+  async function addOpenings(count: number) {
+    const source = await addSource()
+    await upsertJobs(
+      env,
+      source,
+      Array.from({ length: count }, (_, index) =>
+        job({
+          externalId: String(index + 1),
+          company: `Co${index} GmbH`,
+          title: "Senior Product Manager",
+          url: `https://co${index}.example/jobs/1`,
+        }),
+      ),
+      new Set(),
+    )
+  }
+
+  it("writes the nine scores and counts the one the model left out", async () => {
+    await runningCycle()
+    await addOpenings(10)
+    let dropped = ""
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const ids = sentIds(init)
+        dropped = ids[ids.length - 1] ?? ""
+        return reply(ids.slice(0, -1).map((id) => ({ external_id: id, score: 80, reason: "fit", flags: [] })))
+      }),
+    )
+
+    const step = await prefilterAndScore(env, TEST_USER_ID)
+    expect(step.scored).toBe(9)
+    const stored = await rows<{ job_id: string; score: number | null; scoring_attempts: number; scoring_claim_id: string | null }>(
+      env,
+      `SELECT job_id, score, scoring_attempts, scoring_claim_id FROM user_jobs WHERE user_id = ?`,
+      TEST_USER_ID,
+    )
+    expect(stored.filter((row) => row.score === 80)).toHaveLength(9)
+    expect(stored.find((row) => row.job_id === dropped)).toMatchObject({
+      score: null,
+      scoring_attempts: 1,
+      scoring_claim_id: null,
+    })
+    expect(await one(env, `SELECT scored, failed_scoring FROM cycles WHERE id = 1`)).toMatchObject({
+      scored: 9,
+      failed_scoring: 1,
+    })
+  })
+
+  it("stops sending a posting after the model skips it three times", async () => {
+    await runningCycle()
+    await addOpenings(1)
+    const fetchMock = vi.fn(async () => reply([]))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await prefilterAndScore(env, TEST_USER_ID)
+    await prefilterAndScore(env, TEST_USER_ID)
+    await prefilterAndScore(env, TEST_USER_ID)
+
+    expect(await one(env, `SELECT score, scoring_attempts, scoring_claim_id FROM user_jobs`)).toMatchObject({
+      score: null,
+      scoring_attempts: 3,
+      scoring_claim_id: null,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    expect(await prefilterAndScore(env, TEST_USER_ID)).toMatchObject({ scored: 0 })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not store a score for an id the batch did not contain", async () => {
+    await runningCycle()
+    await addOpenings(1)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const [id] = sentIds(init)
+        return reply([
+          { external_id: id!, score: 70, reason: "fit", flags: [] },
+          { external_id: "invented", score: 99, reason: "nope", flags: [] },
+        ])
+      }),
+    )
+
+    await prefilterAndScore(env, TEST_USER_ID)
+    expect(await rows(env, `SELECT job_id, score FROM user_jobs`)).toEqual([
+      expect.objectContaining({ score: 70 }),
+    ])
+    expect(await one(env, `SELECT job_id FROM user_jobs WHERE job_id = 'invented'`)).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain("invented")
+  })
+
+  it("keeps the first score when the model repeats a posting", async () => {
+    await runningCycle()
+    await addOpenings(1)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const [id] = sentIds(init)
+        return reply([
+          { external_id: id!, score: 11, reason: "first", flags: [] },
+          { external_id: id!, score: 99, reason: "second", flags: [] },
+        ])
+      }),
+    )
+
+    const step = await prefilterAndScore(env, TEST_USER_ID)
+    expect(step.scored).toBe(2)
+    expect(await rows(env, `SELECT score, score_reason, scoring_attempts, scoring_claim_id FROM user_jobs`)).toEqual([
+      { score: 11, score_reason: "first", scoring_attempts: 0, scoring_claim_id: null },
+    ])
+    expect(await one(env, `SELECT scored, failed_scoring FROM cycles WHERE id = 1`)).toMatchObject({
+      scored: 1,
+      failed_scoring: 0,
+    })
+  })
+
+  it("keeps a complete reply the way it did before", async () => {
+    await runningCycle()
+    await addOpenings(2)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) =>
+        reply(sentIds(init).map((id) => ({ external_id: id, score: 80, reason: "fit", flags: [] }))),
+      ),
+    )
+
+    const step = await prefilterAndScore(env, TEST_USER_ID)
+    expect(step).toMatchObject({ scored: 2, remaining: 0, more: false })
+    const stored = await rows<{ score: number; scoring_attempts: number; scoring_claim_id: string | null }>(
+      env,
+      `SELECT score, scoring_attempts, scoring_claim_id FROM user_jobs`,
+    )
+    expect(stored).toHaveLength(2)
+    expect(stored.every((row) => row.score === 80 && row.scoring_attempts === 0 && row.scoring_claim_id === null)).toBe(true)
+    expect(await one(env, `SELECT scored, failed_scoring FROM cycles WHERE id = 1`)).toMatchObject({
+      scored: 2,
+      failed_scoring: 0,
+    })
+  })
+})
+
 describe("model usage log", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
