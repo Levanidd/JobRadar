@@ -125,13 +125,18 @@ stats.get("/api/stats", async (c) => {
 
   // A period narrows each number to the events that fall inside it, and every
   // number has its own event: a job counts as found when we first saw it, as
-  // viewed when it was viewed, as an application when it was sent. The two
-  // charts keep their own fixed windows — that is what they are for.
+  // viewed when it was marked viewed or applied to, as an application when it
+  // was sent. The two charts keep their own fixed windows — that is what they are for.
   const since = periodStart(c.req.query("days"))
   const found = since ? "j.first_seen_at >= ?" : "1"
   const acted = (column: string) => (since ? `uj.${column} >= ?` : `uj.${column} IS NOT NULL`)
+  // Applying means the posting was looked at, so it counts as viewed even
+  // without the viewed checkbox. A job that is both is still one.
+  const saw = since
+    ? `(uj.viewed_at >= ? OR uj.applied_at >= ?)`
+    : `(uj.viewed_at IS NOT NULL OR uj.applied_at IS NOT NULL)`
   // These placeholders sit in the SELECT list, ahead of the one the join binds.
-  const totalsBinds = since ? [since, since, since, since, since, ...binds] : binds
+  const totalsBinds = since ? [since, since, since, since, since, since, ...binds] : binds
   const appliedBinds = since ? [userId, since, ...blocked.binds] : binds
 
   const [totals, pipeline, companies, weeks, months] = await c.env.DB.batch<
@@ -141,7 +146,7 @@ stats.get("/api/stats", async (c) => {
       `SELECT
          SUM(CASE WHEN ${found} THEN 1 ELSE 0 END) AS found,
          SUM(CASE WHEN ${found} AND j.closed_at IS NULL THEN 1 ELSE 0 END) AS open,
-         SUM(CASE WHEN ${acted("viewed_at")} THEN 1 ELSE 0 END) AS viewed,
+         SUM(CASE WHEN ${saw} THEN 1 ELSE 0 END) AS viewed,
          SUM(CASE WHEN ${acted("later_at")} THEN 1 ELSE 0 END) AS later,
          SUM(CASE WHEN ${acted("applied_at")} THEN 1 ELSE 0 END) AS applied
        ${join}

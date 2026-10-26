@@ -409,7 +409,7 @@ describe("stats", () => {
     expect(res.body).toMatchObject({
       found: 3,
       open: 3,
-      viewed: 1,
+      viewed: 3,
       later: 1,
       applied: 3,
       pipeline: { waiting: 1, interview: 1, rejected: 1 },
