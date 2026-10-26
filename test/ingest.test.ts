@@ -405,9 +405,9 @@ describe("prefilterAndScore", () => {
     )
 
     const first = await prefilterAndScore(env, TEST_USER_ID, 2)
-    expect(first).toEqual({ scored: 2, remaining: 1, more: true })
+    expect(first).toEqual({ scored: 2, remaining: 1, more: true, limited: false })
     const second = await prefilterAndScore(env, TEST_USER_ID, 2)
-    expect(second).toEqual({ scored: 1, remaining: 0, more: false })
+    expect(second).toEqual({ scored: 1, remaining: 0, more: false, limited: false })
   })
 
   it("marks a cold source as already delivered instead of notifying its backlog", async () => {
@@ -431,7 +431,7 @@ describe("prefilterAndScore", () => {
       .bind(JSON.stringify([{ company_key: "acme", company: "Acme" }]), TEST_USER_ID)
       .run()
 
-    expect(await prefilterAndScore(env, TEST_USER_ID)).toEqual({ scored: 0, remaining: 0, more: false })
+    expect(await prefilterAndScore(env, TEST_USER_ID)).toEqual({ scored: 0, remaining: 0, more: false, limited: false })
     expect(await one(env, `SELECT score FROM user_jobs WHERE user_id = ?`, TEST_USER_ID)).toMatchObject({ score: null })
   })
 })

@@ -290,7 +290,7 @@ async function advance(env: Bindings, row: CycleRow): Promise<boolean> {
     const userId = row.user_id
     const step = userId
       ? await prefilterAndScore(env, userId, SCORE_CHUNK, await cycleUsage(env, row.run_id, userId))
-      : { scored: 0, remaining: 0, more: false }
+      : { scored: 0, remaining: 0, more: false, limited: false }
     const scored = row.scored + step.scored
     if (step.more) {
       await env.DB.prepare(

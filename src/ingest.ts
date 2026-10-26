@@ -4,6 +4,7 @@ import { companyKey, companiesRelated, dedupKey, jobHash, titleKey } from "./com
 import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
 import { pick } from "./locale"
+import { loadScoreQuota, QuotaError, quotaMessage } from "./quota"
 import { clipDescription, passesPrefilter } from "./prefilter"
 import { toSalary } from "./salary"
 import { scoreInBatches, scoreJobs, type ScoreInput } from "./scoring"
@@ -630,6 +631,8 @@ export type ScorePass = {
   remaining: number
   /** Whether another pass would still find work. Drives the cycle's scoring phase. */
   more: boolean
+  /** The monthly limit left part of the queue unscored until it resets. */
+  limited: boolean
 }
 
 /**
@@ -807,7 +810,11 @@ export async function prefilterAndScore(
   }
   await runBatch(env, inherited)
 
-  const batch = limit ? toScore.slice(0, limit) : toScore
+  const config = await resolveScoringConfig(env)
+  // Without a key the local heuristic scores for free, so only model calls are capped.
+  const allowance = config.apiKey ? (await loadScoreQuota(env, userId)).remaining : null
+  const cap = Math.min(limit || Infinity, allowance ?? Infinity)
+  const batch = toScore.slice(0, cap)
   const remaining = toScore.length - batch.length
 
   if (batch.length > 0) {
@@ -825,11 +832,11 @@ export async function prefilterAndScore(
   }
 
   const profile = await profileContent(env, userId)
-  const { scores, skipped } = await withUsage(env, usage, await resolveScoringConfig(env), (config) =>
+  const { scores, skipped } = await withUsage(env, usage, config, (tracked) =>
     scoreInBatches(
       batch.map((item) => item.input),
       profile,
-      config,
+      tracked,
     ),
   )
 
@@ -865,6 +872,7 @@ export async function prefilterAndScore(
       skipped > 0 ||
       (remaining > 0 && scores.length > 0) ||
       (open.results.length === CANDIDATE_WINDOW && resolved > 0),
+    limited: allowance !== null && toScore.length > allowance,
   }
 }
 
@@ -973,13 +981,19 @@ export async function scoreJobsByIds(env: Bindings, ids: string[], userId: numbe
     }>()
   if (rows.results.length === 0) throw new Error("not found")
 
+  const config = await resolveScoringConfig(env)
+  if (config.apiKey) {
+    const quota = await loadScoreQuota(env, userId)
+    if (quota.remaining !== null && quota.remaining < rows.results.length) throw new QuotaError(quotaMessage(quota))
+  }
+
   const filled = await fillLateDescriptions(env, rows.results)
   const profile = await profileContent(env, userId)
   const scores = await withUsage(
     env,
     { kind: "job", userId, trigger: "manual" },
-    await resolveScoringConfig(env),
-    (config) =>
+    config,
+    (tracked) =>
       scoreJobs(
         rows.results.map((job) => ({
           external_id: job.id,
@@ -989,7 +1003,7 @@ export async function scoreJobsByIds(env: Bindings, ids: string[], userId: numbe
           description: filled.get(job.id) ?? job.description ?? "",
         })),
         profile,
-        config,
+        tracked,
       ),
   )
   const byId = new Map(scores.map((row) => [row.external_id, row]))

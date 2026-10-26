@@ -68,7 +68,10 @@ export async function applyProfilePatch(
   return { ok: true, prefilter, applied, blacklist }
 }
 
-export async function resetAndScore(env: Bindings, userId: number): Promise<{ ok: true; scored: number }> {
+export async function resetAndScore(
+  env: Bindings,
+  userId: number,
+): Promise<{ ok: true; scored: number; limited: boolean }> {
   await env.DB.prepare(
     `UPDATE user_jobs SET score = NULL, score_reason = NULL, flags = NULL
      WHERE user_id = ? AND job_id IN (
@@ -77,8 +80,12 @@ export async function resetAndScore(env: Bindings, userId: number): Promise<{ ok
   )
     .bind(userId)
     .run()
-  const { scored } = await prefilterAndScore(env, userId, undefined, { kind: "rescore", userId, trigger: "manual" })
-  return { ok: true, scored }
+  const { scored, limited } = await prefilterAndScore(env, userId, undefined, {
+    kind: "rescore",
+    userId,
+    trigger: "manual",
+  })
+  return { ok: true, scored, limited }
 }
 
 profile.get("/api/profile", async (c) => {

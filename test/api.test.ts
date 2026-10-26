@@ -834,3 +834,82 @@ describe("users", () => {
     ).toMatchObject({ status: 200, body: { user: { role: "user" } } })
   })
 })
+
+describe("monthly score quota", () => {
+  /** Answers a Gemini scoring request with a score for every posting it was sent. */
+  function geminiMock() {
+    return vi.fn(async (_url: string, init: RequestInit) => {
+      const ids = [...String(init.body).matchAll(/external_id: ([^\\\n]+)/g)].map((match) => match[1])
+      const scores = ids.map((id) => ({ external_id: id, score: 80, reason: "fit", flags: [] }))
+      return new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify({ scores }) }] } }],
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 4 },
+        }),
+      )
+    })
+  }
+
+  async function spend(userId: number, jobs: number, kind = "score"): Promise<void> {
+    const now = new Date().toISOString()
+    const batch = await env.DB.prepare(
+      `INSERT INTO model_batches (kind, user_id, trigger, started_at, finished_at) VALUES (?, ?, 'manual', ?, ?) RETURNING id`,
+    )
+      .bind(kind, userId, now, now)
+      .first<{ id: number }>()
+    await env.DB.prepare(
+      `INSERT INTO model_requests (batch_id, model, started_at, finished_at, duration_ms, jobs, ok)
+       VALUES (?, 'm', ?, ?, 1, ?, 1)`,
+    )
+      .bind(batch!.id, now, now, jobs)
+      .run()
+  }
+
+  async function seedTwoJobs(): Promise<string[]> {
+    await seedJob({ externalId: "1", title: "Senior Product Manager", company: "Acme" })
+    await seedJob(
+      { externalId: "2", title: "Lead Product Manager", company: "Globex", url: "https://globex.example/jobs/2" },
+      { label: "Globex", token: "globex" },
+    )
+    return (await env.DB.prepare(`SELECT id FROM jobs ORDER BY id`).all<{ id: string }>()).results.map((row) => row.id)
+  }
+
+  it("stops a regular user's scoring at the limit and reports what is left", async () => {
+    env.GEMINI_API_KEY = "gemini-key"
+    vi.stubGlobal("fetch", geminiMock())
+    try {
+      const [first] = await seedTwoJobs()
+      const created = await call("/api/users", { method: "POST", body: JSON.stringify({ name: "Лена" }) })
+      const lena = created.body.user.id as number
+      const token = created.body.user.token as string
+      await spend(lena, 4990)
+      await spend(lena, 500, "lab")
+      await spend(lena, 9)
+
+      expect((await call("/api/me", { token })).body.score_quota).toMatchObject({ used: 4999, limit: 5000, remaining: 1 })
+
+      const rescored = await call("/api/profile/rescore", { method: "POST", token })
+      expect(rescored.body).toMatchObject({ scored: 1, limited: true })
+      expect((await call("/api/me", { token })).body.score_quota).toMatchObject({ used: 5000, remaining: 0 })
+
+      const refused = await call(`/api/jobs/${first}/score`, { method: "POST", token })
+      expect(refused.status).toBe(429)
+      expect(refused.body.error).toMatch(/5000/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("leaves the master uncapped", async () => {
+    env.GEMINI_API_KEY = "gemini-key"
+    vi.stubGlobal("fetch", geminiMock())
+    try {
+      await seedTwoJobs()
+      await spend(1, 6000)
+      expect((await call("/api/me")).body.score_quota).toMatchObject({ used: 6000, limit: null, remaining: null })
+      expect((await call("/api/profile/rescore", { method: "POST" })).body).toMatchObject({ scored: 2, limited: false })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})

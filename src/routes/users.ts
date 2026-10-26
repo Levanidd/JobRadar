@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 
 import { masterGuard } from "../auth"
+import { loadScoreQuota } from "../quota"
 import { listOpenCompanies } from "../settings"
 import type { AppEnv, UserRole } from "../types"
 import {
@@ -16,7 +17,10 @@ import { applyProfilePatch, resetAndScore } from "./profile"
 
 export const users = new Hono<AppEnv>()
 
-users.get("/api/me", (c) => c.json(c.get("user")))
+users.get("/api/me", async (c) => {
+  const user = c.get("user")
+  return c.json({ ...user, score_quota: await loadScoreQuota(c.env, user.id) })
+})
 
 users.get("/api/users", async (c) => {
   const denied = masterGuard(c)

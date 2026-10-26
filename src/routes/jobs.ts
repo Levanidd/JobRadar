@@ -3,6 +3,7 @@ import { Hono } from "hono"
 import { currentUser } from "../auth"
 import { message } from "../errors"
 import { createManualJob, scoreJobsByIds, scoreOneJob, setPrimaryListing } from "../ingest"
+import { QuotaError } from "../quota"
 import type { AppEnv } from "../types"
 import { JOB_COLUMNS, JOB_SOURCE, appliedFilters, jobFilters, jobOrder } from "./job-query"
 
@@ -184,6 +185,7 @@ jobs.post("/api/jobs/score", async (c) => {
     return c.json({ jobs: await scoreJobsByIds(c.env, ids, currentUser(c).id) })
   } catch (error) {
     const detail = message(error)
+    if (error instanceof QuotaError) return c.json({ error: detail }, 429)
     return c.json({ error: detail }, detail === "not found" ? 404 : 502)
   }
 })
@@ -346,6 +348,7 @@ jobs.post("/api/jobs/:id/score", async (c) => {
     return c.json(await scoreOneJob(c.env, c.req.param("id"), currentUser(c).id))
   } catch (error) {
     const detail = message(error)
+    if (error instanceof QuotaError) return c.json({ error: detail }, 429)
     return c.json({ error: detail }, detail === "not found" ? 404 : 502)
   }
 })
