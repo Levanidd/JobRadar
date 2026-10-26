@@ -58,6 +58,7 @@ export const ru: Record<string, string> = {
   "Clear the source filter": "Убрать фильтр по источнику",
   "Source: {name} ×": "Источник: {name} ×",
   "Nothing found": "Ничего не нашлось",
+  "Show more": "Показать ещё",
   "Loosen the filters or start a run.": "Ослабьте фильтры или запустите прогон.",
   "{count} companies in the filter": "компаний в фильтре: {count}",
   "scoring {done} of {total}": "считаю {done} из {total}",

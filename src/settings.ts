@@ -169,8 +169,8 @@ export async function blockedCompanyKeys(env: Bindings): Promise<Set<string>> {
 export function sqlExcludeCompanyKeys(column: string, keys: string[]): { sql: string; binds: string[] } {
   if (keys.length === 0) return { sql: "1=1", binds: [] }
   return {
-    sql: `(${column} IS NULL OR ${column} NOT IN (${keys.map(() => "?").join(", ")}))`,
-    binds: keys,
+    sql: `(${column} IS NULL OR ${column} NOT IN (SELECT value FROM json_each(?)))`,
+    binds: [JSON.stringify(keys)],
   }
 }
 

@@ -159,9 +159,21 @@ function listedJobs(sourceScoped: boolean): string {
   LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?`
 }
 
+const PAGE_DEFAULT = 50
+const PAGE_MAX = 99
+
+function pageBounds(rawLimit: string | undefined, rawOffset: string | undefined): { limit: number; offset: number } {
+  const limitValue = Number(rawLimit ?? PAGE_DEFAULT)
+  const offsetValue = Number(rawOffset ?? 0)
+  const limit = Number.isFinite(limitValue) && limitValue >= 1 ? Math.min(PAGE_MAX, Math.floor(limitValue)) : PAGE_DEFAULT
+  const offset = Number.isFinite(offsetValue) && offsetValue >= 0 ? Math.floor(offsetValue) : 0
+  return { limit, offset }
+}
+
 jobs.get("/api/jobs", async (c) => {
   const userId = currentUser(c).id
   const sourceScoped = Boolean(Number(c.req.query("source_id") ?? 0))
+  const { limit, offset } = pageBounds(c.req.query("limit"), c.req.query("offset"))
   const { clauses, binds } = await jobFilters(c, true)
   const jobsHint = sourceScoped ? "" : " INDEXED BY idx_jobs_list_cover"
   // The source table is only needed when the tier filter reads it. The default
@@ -174,12 +186,14 @@ jobs.get("/api/jobs", async (c) => {
      LEFT JOIN user_jobs uj INDEXED BY idx_user_jobs_list ON uj.job_id = j.id AND uj.user_id = ?
      WHERE ${clauses}
      ORDER BY ${jobOrder(c)}
-     LIMIT 500`,
+     LIMIT ? OFFSET ?`,
   )
-    .bind(userId, ...binds)
+    .bind(userId, ...binds, limit, offset)
     .all<{ id: string }>()
   const ids = ordered.results.map((row) => row.id)
-  if (ids.length === 0) return c.json({ jobs: [] })
+  const hasMore = ids.length === limit
+  const nextOffset = offset + ids.length
+  if (ids.length === 0) return c.json({ jobs: [], has_more: false, next_offset: nextOffset })
 
   const loaded = await c.env.DB.prepare(
     `SELECT ${JOB_COLUMNS}, s.tier, s.label as source_label
@@ -191,7 +205,11 @@ jobs.get("/api/jobs", async (c) => {
     .bind(userId, ...ids)
     .all<{ id: string }>()
   const byId = new Map(loaded.results.map((row) => [row.id, row]))
-  return c.json({ jobs: ids.flatMap((id) => { const row = byId.get(id); return row ? [row] : [] }) })
+  return c.json({
+    jobs: ids.flatMap((id) => { const row = byId.get(id); return row ? [row] : [] }),
+    has_more: hasMore,
+    next_offset: nextOffset,
+  })
 })
 
 /** Fills jobs.text_hash from job_texts. Master only. Call again with the returned rowid until it is 0. */

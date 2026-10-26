@@ -73,6 +73,8 @@ function withTitle(template: string, title: string) {
   )
 }
 
+const PAGE_SIZE = 50
+
 const DEFAULT_FILTERS: JobFilters = {
   min_score: 50,
   sort: "score",
@@ -143,6 +145,9 @@ export function Jobs({
     { store: !preset },
   )
   const [jobs, setJobs] = useState<Job[] | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [nextOffset, setNextOffset] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [companies, setCompanies] = useState<CompanyFacet[]>([])
   const [card, setCard] = useState<Job | null>(null)
   const [scoring, setScoring] = useState<string | null>(null)
@@ -159,6 +164,9 @@ export function Jobs({
 
   // Unchecking "applied" should not erase where the job stood before.
   const previous = useRef(new Map<string, JobStatus>())
+  const generation = useRef(0)
+  const loadedCount = useRef(0)
+  const moreLock = useRef(false)
 
   const {
     status,
@@ -174,10 +182,58 @@ export function Jobs({
   const picked = filters.companies ?? []
 
   const load = useCallback(async (silent = false) => {
+    const gen = ++generation.current
+    moreLock.current = false
     if (!silent) setJobs(null)
-    const result = await run(() => api.jobs(filters))
-    if (result) setJobs(result.jobs)
+    const target = silent ? Math.max(PAGE_SIZE, loadedCount.current) : PAGE_SIZE
+    const collected: Job[] = []
+    const seen = new Set<string>()
+    let offset = 0
+    let more = false
+    let next = 0
+    while (collected.length < target) {
+      const result = await run(() => api.jobs({ ...filters, limit: PAGE_SIZE, offset }))
+      if (gen !== generation.current) return
+      if (!result) return
+      let added = 0
+      for (const job of result.jobs) {
+        if (seen.has(job.id)) continue
+        seen.add(job.id)
+        collected.push(job)
+        added += 1
+      }
+      more = result.has_more
+      next = result.next_offset
+      if (!result.has_more || added === 0) break
+      offset = result.next_offset
+    }
+    if (gen !== generation.current) return
+    loadedCount.current = collected.length
+    setJobs(collected)
+    setHasMore(more)
+    setNextOffset(next)
+    setLoadingMore(false)
   }, [run, filters])
+
+  async function showMore() {
+    if (moreLock.current || !hasMore) return
+    const gen = generation.current
+    moreLock.current = true
+    setLoadingMore(true)
+    const result = await run(() => api.jobs({ ...filters, limit: PAGE_SIZE, offset: nextOffset }))
+    moreLock.current = false
+    setLoadingMore(false)
+    if (!result || gen !== generation.current) return
+    setJobs((prev) => {
+      const seen = new Set((prev ?? []).map((job) => job.id))
+      const extra = result.jobs.filter((job) => !seen.has(job.id))
+      const next = [...(prev ?? []), ...extra]
+      loadedCount.current = next.length
+      return next
+    })
+    setHasMore(result.has_more)
+    setNextOffset(result.next_offset)
+  }
 
   useLoader(load)
 
@@ -687,6 +743,13 @@ export function Jobs({
               </tbody>
             </table>
           </div>
+          {hasMore ? (
+            <div className="row">
+              <button type="button" className="btn" disabled={loadingMore} onClick={() => void showMore()}>
+                {loadingMore ? t("Loading…") : t("Show more")}
+              </button>
+            </div>
+          ) : null}
         </>
       )}
 

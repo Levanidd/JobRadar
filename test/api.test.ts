@@ -116,7 +116,46 @@ describe("jobs", () => {
     await seedJob()
     const res = await call("/api/jobs")
     expect(res.body.jobs).toHaveLength(1)
+    expect(res.body).toMatchObject({ has_more: false, next_offset: 1 })
     expect(res.body.jobs[0]).toMatchObject({ title: "Senior Product Manager", source_label: "Acme", tier: "watchlist" })
+  })
+
+  it("pages the list without repeating a row", async () => {
+    await env.DB.prepare(
+      `INSERT INTO sources (kind, tier, label, provider, token) VALUES ('company', 'watchlist', 'Acme', 'greenhouse', 'acme')`,
+    ).run()
+    const source = await one<SourceRow>(env, `SELECT * FROM sources WHERE token = 'acme'`)
+    await upsertJobs(
+      env,
+      source!,
+      ["1", "2", "3"].map((externalId) => ({
+        externalId,
+        title: `Senior Product Manager ${externalId}`,
+        company: `Co${externalId} GmbH`,
+        url: `https://co${externalId}.example/jobs/1`,
+        location: "Berlin",
+        description: "Payments.",
+      })),
+      new Set(),
+    )
+    const stored = await env.DB.prepare(`SELECT id FROM jobs ORDER BY id`).all<{ id: string }>()
+    for (const [index, row] of stored.results.entries()) {
+      await env.DB.prepare(`INSERT INTO user_jobs (user_id, job_id, score) VALUES (1, ?, ?)`).bind(row.id, 90 - index).run()
+    }
+
+    const full = await call("/api/jobs?status=any&sort=score&dir=desc&limit=99")
+    const first = await call("/api/jobs?status=any&sort=score&dir=desc&limit=2&offset=0")
+    const second = await call(`/api/jobs?status=any&sort=score&dir=desc&limit=2&offset=${first.body.next_offset}`)
+    expect(first.body.jobs).toHaveLength(2)
+    expect(first.body).toMatchObject({ has_more: true, next_offset: 2 })
+    expect(second.body.jobs).toHaveLength(1)
+    expect(second.body.has_more).toBe(false)
+    const seen = new Set(first.body.jobs.map((job: { id: string }) => job.id))
+    expect(second.body.jobs.every((job: { id: string }) => !seen.has(job.id))).toBe(true)
+    expect([...first.body.jobs, ...second.body.jobs].map((job: { id: string }) => job.id)).toEqual(
+      full.body.jobs.map((job: { id: string }) => job.id),
+    )
+    expect((await call("/api/jobs?status=any&limit=500")).body.jobs).toHaveLength(3)
   })
 
   it("filters by viewed, company and score", async () => {

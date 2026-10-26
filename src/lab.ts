@@ -359,9 +359,9 @@ async function loadSourceRows(env: Bindings, userId: number, ids: string[]): Pro
        uj.score, uj.score_reason, uj.flags, uj.status
      FROM jobs j ${JOB_TEXT_JOIN}
      JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
-     WHERE j.id IN (${placeholders(ids.length)})`,
+     WHERE j.id IN (SELECT value FROM json_each(?))`,
   )
-    .bind(userId, ...ids)
+    .bind(userId, JSON.stringify(ids))
     .all<SourceRow>()
   return rows.results
 }
@@ -1529,9 +1529,9 @@ export async function retryLabRun(
     `UPDATE lab_trials SET status = 'pending', attempts = 0, score = NULL, reason = NULL, flags = NULL,
        raw_response = NULL, error_code = NULL, error = NULL, input_tokens = NULL, output_tokens = NULL,
        thought_tokens = NULL, duration_ms = NULL, claimed_at = NULL, finished_at = NULL
-     WHERE lab_run_id = ? AND status = 'failed' ${ids.length ? `AND id IN (${placeholders(ids.length)})` : ""}`,
+     WHERE lab_run_id = ? AND status = 'failed' ${ids.length ? `AND id IN (SELECT value FROM json_each(?))` : ""}`,
   )
-    .bind(id, ...ids)
+    .bind(id, ...(ids.length ? [JSON.stringify(ids)] : []))
     .run()
   if (!Number(reset.meta.changes)) return bad(pick("No failed trials", "Нет упавших попыток"))
   // The recount stamps updated_at, so it goes first: a reopened run has to look stale for the kick that follows.
