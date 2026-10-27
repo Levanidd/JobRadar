@@ -9,7 +9,7 @@ import { RefreshIcon } from "../components/icons"
 import { JobCard, STATUS_LABELS, openOnDoubleClick } from "../components/JobCard"
 import { MultiSelect } from "../components/MultiSelect"
 import { SortHeader } from "../components/SortHeader"
-import { Age, Count, Empty, Flags, ScoreBadge, Skeletons, formatSalary, plural } from "../components/common"
+import { Age, Count, Empty, Flags, RepostBadge, ScoreBadge, Skeletons, formatSalary, plural } from "../components/common"
 import type { CompanyFacet, Job, JobStatus } from "../types"
 
 /**
@@ -726,6 +726,14 @@ export function Jobs({
                           {job.title}
                         </a>
                         <div className="cell-sub">
+                          <RepostBadge
+                            raw={job.flags}
+                            onOpen={(id) => {
+                              void api.job(id).then((result) => {
+                                setCard(result.job)
+                              })
+                            }}
+                          />
                           <span className="cell-company-inline">{job.company}</span>
                           {job.location ? <span>{job.location}</span> : null}
                           {pay ? <span>{pay}</span> : null}

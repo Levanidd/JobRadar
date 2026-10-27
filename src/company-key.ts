@@ -1,3 +1,4 @@
+import { isAtsProvider } from "./boards"
 import { isPlaceOnly, locationKey } from "./places"
 
 const SUFFIX = /\b(gmbh|se|ag|ltd|inc|b\.v\.|bv|llc|plc|kg|ohg|ug)\b/gi
@@ -21,6 +22,75 @@ export function companiesRelated(a: string, b: string): boolean {
   if (a === b) return true
   const [short, long] = a.length <= b.length ? [a, b] : [b, a]
   return long.startsWith(`${short} `) || long.endsWith(` ${short}`)
+}
+
+/** Tails that are a site or a holding, not the employer. Only the end of the key. */
+const MATCH_TAIL = / (com|io|ai|group|solutions|technologies|labs|hq|holding|inc|ltd|llc|bv|oy|ab|as|sa|spa|srl)$/
+
+/**
+ * A looser company key for twin search and repost lookup. `company_key` stays
+ * as it is: Impact and impact.com share this key, and a different career
+ * domain is what keeps them apart.
+ */
+export function companyMatchKey(name: string): string {
+  let key = companyKey(name)
+  for (let step = 0; step < 3; step++) {
+    const next = key.replace(MATCH_TAIL, "")
+    if (next === key) break
+    key = next
+  }
+  return key
+}
+
+const ATS_BOARD = /(?:^|\.)(?:greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|smartrecruiters\.com|recruitee\.com|personio\.(?:de|com)|workable\.com|teamtailor\.com|bamboohr\.com|breezy\.hr|pinpointhq\.com|rippling\.com|oraclecloud\.com|successfactors\.(?:com|eu)|gem\.com|join\.com)$/
+
+/** Host, or the board slug when the host is shared by every customer of an ATS. */
+export function careerDomain(url: string | null | undefined): string | null {
+  if (!url) return null
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  const host = parsed.hostname.replace(/^www\./, "").toLowerCase()
+  if (!host || host === "localhost") return null
+  if (ATS_BOARD.test(host)) {
+    const slug = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase()
+    if (!slug || slug === "jobs" || slug === "job") return null
+    const board = host.includes("greenhouse")
+      ? "greenhouse"
+      : host.includes("lever")
+        ? "lever"
+        : host.includes("ashby")
+          ? "ashby"
+          : host
+    return `${board}/${slug}`
+  }
+  const parts = host.split(".")
+  if (parts.length >= 3 && (parts.at(-2) === "co" || parts.at(-2) === "com")) return parts.slice(-3).join(".")
+  return parts.length >= 2 ? parts.slice(-2).join(".") : host
+}
+
+/** True when both postings name a career domain and the domains differ. */
+export function domainsConflict(a: string | null | undefined, b: string | null | undefined): boolean {
+  return Boolean(a && b && a !== b)
+}
+
+/**
+ * The employer's own board. An aggregator's posting URL is not one, so two
+ * copies of Hospitable can still meet when only one of them links to Workable.
+ */
+export function employerDomain(
+  provider: string,
+  careersUrl: string | null | undefined,
+  jobUrl: string | null | undefined,
+): string | null {
+  if (isAtsProvider(provider)) return careerDomain(careersUrl) ?? careerDomain(jobUrl)
+  const career = careerDomain(careersUrl)
+  const posting = careerDomain(jobUrl)
+  if (career && career !== posting) return career
+  return null
 }
 
 /** German and Dutch postings tag the title with a gender marker that varies by board. */

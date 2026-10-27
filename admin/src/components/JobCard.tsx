@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNo
 import { api } from "../api"
 import { useAction } from "../app-context"
 import { getLang, useT } from "../i18n"
-import { Age, Field, ScoreBadge, formatDate, formatSalary } from "./common"
+import { Age, Field, RepostBadge, ScoreBadge, formatDate, formatSalary } from "./common"
 import { DocumentIcon, PencilIcon, PlusIcon, TrashIcon } from "./icons"
 import type { InterviewStage, Job, JobDuplicate, JobStatus } from "../types"
 
@@ -556,6 +556,12 @@ export function JobCard({
                   </a>
                 ) : null}
                 <span className={`badge ${STATUS_TONE[job.status] ?? "badge-neutral"}`}>{STATUS_LABELS[job.status]}</span>
+                <RepostBadge
+                  raw={job.flags}
+                  onOpen={(id) => {
+                    void api.job(id).then((result) => onJob?.(result.job))
+                  }}
+                />
               </h3>
               <p className="card-sub">
                 <button
