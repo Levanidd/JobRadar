@@ -4,7 +4,7 @@ import { currentUser, masterGuard } from "../auth"
 import { message } from "../errors"
 import { placeholders } from "../db"
 import { rekeyDedupBatch, unlinkDedupBatch } from "../dedup-rekey"
-import { createManualJob, scoreJobsByIds, scoreOneJob, setPrimaryListing } from "../ingest"
+import { createManualJob, prefilterAndScore, scoreJobsByIds, scoreOneJob, setPrimaryListing } from "../ingest"
 import { backfillJobTexts, backfillTextHashes, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "../job-text"
 import { QuotaError } from "../quota"
 import type { AppEnv } from "../types"
@@ -250,6 +250,28 @@ jobs.post("/api/jobs/rekey-dedup", async (c) => {
   if (!Number.isFinite(limit) || limit < 1) return c.json({ error: "limit must be at least 1" }, 400)
   const result = phase === "links" ? await unlinkDedupBatch(c.env, after, limit) : await rekeyDedupBatch(c.env, after, limit)
   return c.json({ phase, ...result })
+})
+
+/** Scores jobs a dedup migration released, including ones older than the window. One batch. Master only. */
+jobs.post("/api/jobs/score-released", async (c) => {
+  const denied = masterGuard(c)
+  if (denied) return denied
+  const userId = Number(c.req.query("user") ?? 1)
+  if (!Number.isInteger(userId) || userId < 1) return c.json({ error: "user must be an id" }, 400)
+  const picked = await c.env.DB.prepare(
+    `SELECT r.job_id AS id
+     FROM dedup_released r
+     JOIN jobs j ON j.id = r.job_id
+     LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+     WHERE j.duplicate_of IS NULL AND j.closed_at IS NULL AND uj.score IS NULL
+     LIMIT 80`,
+  )
+    .bind(userId)
+    .all<{ id: string }>()
+  const ids = picked.results.map((row) => row.id)
+  if (ids.length === 0) return c.json({ user: userId, scored: 0, done: true })
+  const result = await prefilterAndScore(c.env, userId, undefined, undefined, { includeOld: true, onlyIds: ids })
+  return c.json({ user: userId, asked: ids.length, ...result, done: false })
 })
 
 /** Fills jobs.text_hash from job_texts. Master only. Call again with the returned rowid until it is 0. */

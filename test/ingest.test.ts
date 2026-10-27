@@ -300,14 +300,33 @@ describe("upsertJobs", () => {
     )
     expect(stored).toHaveLength(2)
     expect(stored[0]).toMatchObject({
-      url: "https://www.arbeitnow.com/jobs/acme-spm",
-      company: "Acme Digital GmbH",
+      url: "https://boards.greenhouse.io/acme/jobs/1",
+      company: "Acme",
       duplicate_of: null,
     })
     expect(stored[1]).toMatchObject({
-      url: "https://boards.greenhouse.io/acme/jobs/1",
-      company: "Acme",
+      url: "https://www.arbeitnow.com/jobs/acme-spm",
+      company: "Acme Digital GmbH",
     })
+    expect(stored[1].duplicate_of).toBeTruthy()
+  })
+
+  it("prefers the career site over an aggregator filed as a company source", async () => {
+    const feed = await addSource({ kind: "company", provider: "arbeitnow", token: "*", label: "Arbeitnow · all" })
+    await upsertJobs(env, feed, [job({ url: "https://www.arbeitnow.com/jobs/acme" })], new Set())
+    const company = await addSource()
+    await upsertJobs(
+      env,
+      company,
+      [job({ externalId: "2", url: "https://boards.greenhouse.io/acme/jobs/1" })],
+      new Set(),
+    )
+
+    const stored = await rows<{ url: string; duplicate_of: string | null }>(
+      env,
+      `SELECT url, duplicate_of FROM jobs ORDER BY duplicate_of IS NULL DESC`,
+    )
+    expect(stored[0]).toMatchObject({ url: "https://boards.greenhouse.io/acme/jobs/1", duplicate_of: null })
     expect(stored[1].duplicate_of).toBeTruthy()
   })
 
@@ -882,6 +901,38 @@ describe("markMissingClosed", () => {
     expect(byUrl.get("https://himalayas.app/jobs/young")).toBeNull()
     expect(byUrl.get("https://himalayas.app/jobs/old")).toBeTruthy()
     expect(byUrl.get("https://himalayas.app/jobs/seen")).toBeNull()
+  })
+
+  it("hands a closed career-site primary to its open copy", async () => {
+    const company = await addSource()
+    await upsertJobs(env, company, [job({ url: "https://boards.greenhouse.io/acme/jobs/1" })], new Set())
+    const board = await addSource({ kind: "query", provider: "arbeitnow", token: "product" })
+    await upsertJobs(env, board, [job({ externalId: "9", url: "https://www.arbeitnow.com/jobs/acme" })], new Set())
+    const primary = await one<{ id: string }>(env, `SELECT id FROM jobs WHERE duplicate_of IS NULL`)
+    await env.DB.prepare(`INSERT INTO user_jobs (user_id, job_id, status, score) VALUES (?, ?, 'new', 70)`)
+      .bind(TEST_USER_ID, primary!.id)
+      .run()
+    await env.DB.prepare(`UPDATE jobs SET last_seen_at = '2026-10-01 00:00:00' WHERE id = ?`).bind(primary!.id).run()
+
+    await markMissingClosed(env, company, "2099-01-01 00:00:00")
+
+    const stored = await rows<{ url: string; duplicate_of: string | null; closed_at: string | null; score: number | null }>(
+      env,
+      `SELECT j.url, j.duplicate_of, j.closed_at, uj.score
+       FROM jobs j LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+       ORDER BY j.closed_at IS NULL DESC`,
+      TEST_USER_ID,
+    )
+    expect(stored[0]).toMatchObject({
+      url: "https://www.arbeitnow.com/jobs/acme",
+      duplicate_of: null,
+      closed_at: null,
+      score: 70,
+    })
+    expect(stored[1].closed_at).toBeTruthy()
+    const open = await one<{ id: string }>(env, `SELECT id FROM jobs WHERE duplicate_of IS NULL AND closed_at IS NULL`)
+    const queued = await one<{ job_id: string }>(env, `SELECT job_id FROM dedup_released WHERE job_id = ?`, open!.id)
+    expect(queued?.job_id).toBe(open!.id)
   })
 })
 

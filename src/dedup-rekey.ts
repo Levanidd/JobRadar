@@ -1,4 +1,4 @@
-import { dedupKey } from "./company-key"
+import { dedupKey, roleKey } from "./company-key"
 import { runBatch } from "./db"
 import type { Bindings } from "./types"
 
@@ -9,6 +9,7 @@ type OpenJob = {
   title: string
   location: string | null
   dedup_key: string | null
+  role_key: string | null
 }
 
 type LinkedJob = OpenJob & {
@@ -36,7 +37,7 @@ export async function rekeyDedupBatch(
 ): Promise<{ after: number; updated: number }> {
   const size = Math.min(200, Math.max(1, Math.floor(limit)))
   const picked = await env.DB.prepare(
-    `SELECT rowid AS rid, id, company, title, location, dedup_key
+    `SELECT rowid AS rid, id, company, title, location, dedup_key, role_key
      FROM jobs
      WHERE closed_at IS NULL AND rowid > ?
      ORDER BY rowid
@@ -50,8 +51,11 @@ export async function rekeyDedupBatch(
   const writes = []
   for (const row of rows) {
     const next = dedupKey(row.company, row.title, row.location) || null
-    if ((row.dedup_key ?? null) === next) continue
-    writes.push(env.DB.prepare(`UPDATE jobs SET dedup_key = ? WHERE id = ?`).bind(next, row.id))
+    const role = roleKey(row.company, row.title) || null
+    if ((row.dedup_key ?? null) === next && (row.role_key ?? null) === role) continue
+    writes.push(
+      env.DB.prepare(`UPDATE jobs SET dedup_key = ?, role_key = ? WHERE id = ?`).bind(next, role, row.id),
+    )
   }
   await runBatch(env, writes)
   return { after: rows[rows.length - 1]!.rid, updated: writes.length }
