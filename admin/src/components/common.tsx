@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
 import { getLang } from "../i18n"
+import { flagTags, readRepost, repostDate } from "../repost-flag"
 
 export function Empty({ title, hint }: { title: string; hint?: string }) {
   return (
@@ -65,13 +66,32 @@ const FLAG_LABELS: Record<string, { en: string; ru: string }> = {
 }
 
 function parseFlags(raw: string | null): string[] {
-  if (!raw) return []
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((f): f is string => typeof f === "string") : []
-  } catch {
-    return []
-  }
+  return flagTags(raw)
+}
+
+export function RepostBadge({ raw, onOpen }: { raw: string | null; onOpen?: (id: string) => void }) {
+  const repost = readRepost(raw)
+  if (!repost) return null
+  const lang = getLang()
+  const date = repostDate(repost.prev_date)
+  const label =
+    repost.prev_status === "rejected"
+      ? lang === "ru"
+        ? `Отказ ${date}`
+        : `Rejected ${date}`
+      : repost.prev_status === "interview"
+        ? lang === "ru"
+          ? `Интервью ${date}`
+          : `Interview ${date}`
+        : lang === "ru"
+          ? `Подавался ${date}`
+          : `Applied ${date}`
+  if (!onOpen) return <span className="badge badge-warning">{label}</span>
+  return (
+    <button type="button" className="badge badge-warning" onClick={() => onOpen(repost.repost_of)}>
+      {label}
+    </button>
+  )
 }
 
 export function Flags({ raw }: { raw: string | null }) {

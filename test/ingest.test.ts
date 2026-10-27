@@ -174,6 +174,178 @@ describe("upsertJobs", () => {
     ])
   })
 
+  it("joins a blank location to the only city and leaves it alone when cities differ", async () => {
+    const source = await addSource()
+    await upsertJobs(
+      env,
+      source,
+      [
+        job({ externalId: "berlin", location: "Berlin, Germany", url: "https://acme.example/berlin" }),
+        job({ externalId: "blank", location: "", url: "https://acme.example/blank" }),
+      ],
+      new Set(),
+    )
+    const oneCity = await rows<{ url: string; duplicate_of: string | null }>(
+      env,
+      `SELECT url, duplicate_of FROM jobs ORDER BY duplicate_of IS NULL DESC, url`,
+    )
+    expect(oneCity[0]).toMatchObject({ url: "https://acme.example/berlin", duplicate_of: null })
+    expect(oneCity[1].duplicate_of).toBeTruthy()
+
+    await upsertJobs(
+      env,
+      source,
+      [
+        job({ externalId: "london", location: "London, UK", url: "https://acme.example/london" }),
+        job({ externalId: "blank-2", location: "", url: "https://acme.example/blank-2" }),
+      ],
+      new Set(),
+    )
+    const london = await one<{ id: string; duplicate_of: string | null }>(
+      env,
+      `SELECT id, duplicate_of FROM jobs WHERE url = ?`,
+      "https://acme.example/london",
+    )
+    const blank = await one<{ duplicate_of: string | null }>(
+      env,
+      `SELECT duplicate_of FROM jobs WHERE url = ?`,
+      "https://acme.example/blank-2",
+    )
+    const berlin = await one<{ id: string }>(env, `SELECT id FROM jobs WHERE url = ?`, "https://acme.example/berlin")
+    const firstBlank = await one<{ id: string }>(env, `SELECT id FROM jobs WHERE url = ?`, "https://acme.example/blank")
+    expect(london?.duplicate_of).toBeNull()
+    expect(blank?.duplicate_of === null || blank?.duplicate_of === firstBlank?.id).toBe(true)
+    expect(blank?.duplicate_of).not.toBe(berlin?.id)
+    expect(blank?.duplicate_of).not.toBe(london?.id)
+  })
+
+  it("flags a new posting in another city when the person already applied", async () => {
+    const source = await addSource({ label: "Flix", provider: "greenhouse", token: "flix" })
+    await upsertJobs(
+      env,
+      source,
+      [job({ company: "Flix", title: "Senior Product Owner", location: "Berlin", url: "https://flix.example/1" })],
+      new Set(),
+    )
+    const first = await one<{ id: string }>(env, `SELECT id FROM jobs`)
+    await env.DB.prepare(
+      `INSERT INTO user_jobs (user_id, job_id, status, applied_at) VALUES (?, ?, 'applied', '2026-10-06 07:18:20')`,
+    )
+      .bind(TEST_USER_ID, first!.id)
+      .run()
+    await upsertJobs(
+      env,
+      source,
+      [job({ company: "Flix", externalId: "2", title: "Senior Product Owner", location: "Munich", url: "https://flix.example/2" })],
+      new Set(),
+    )
+    const next = await one<{ duplicate_of: string | null; status: string; flags: string | null; score: number | null }>(
+      env,
+      `SELECT j.duplicate_of, uj.status, uj.flags, uj.score
+       FROM jobs j LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+       WHERE j.url = ?`,
+      TEST_USER_ID,
+      "https://flix.example/2",
+    )
+    expect(next?.duplicate_of).toBeNull()
+    expect(next?.status).toBe("off_profile")
+    expect(next?.score).toBeNull()
+    expect(next?.flags).toContain(first!.id)
+    expect(next?.flags).toContain("exact")
+  })
+
+  it("groups Hospitable with Hospitable.com when the board and the place match", async () => {
+    const board = "https://job-boards.greenhouse.io/hospitable"
+    const first = await addSource({ label: "Hospitable", provider: "greenhouse", token: "hospitable" })
+    await env.DB.prepare(`UPDATE sources SET careers_url = ? WHERE id = ?`).bind(board, first.id).run()
+    await upsertJobs(
+      env,
+      { ...first, careers_url: board },
+      [
+        job({
+          company: "Hospitable",
+          title: "Senior Product Manager, Core",
+          location: "Berlin, Germany",
+          url: `${board}/jobs/1`,
+        }),
+      ],
+      new Set(),
+    )
+    const second = await addSource({ label: "Hospitable.com", provider: "greenhouse", token: "hospitable-com" })
+    await upsertJobs(
+      env,
+      second,
+      [
+        job({
+          company: "Hospitable.com",
+          externalId: "2",
+          title: "Senior Product Manager, Core (USA/Europe - Remote)",
+          location: "Berlin, Germany",
+          url: `${board}/jobs/2`,
+        }),
+      ],
+      new Set(),
+    )
+    const stored = await rows<{ company: string; duplicate_of: string | null }>(
+      env,
+      `SELECT company, duplicate_of FROM jobs ORDER BY duplicate_of IS NULL DESC`,
+    )
+    expect(stored).toHaveLength(2)
+    expect(stored[0]?.duplicate_of).toBeNull()
+    expect(stored[1]?.duplicate_of).toBeTruthy()
+  })
+
+  it("groups a startup-jobs copy of Hospitable.com with the workable posting", async () => {
+    const board = await addSource({ label: "Hospitable", provider: "workable", token: "hospitable-board" })
+    await upsertJobs(
+      env,
+      board,
+      [
+        job({
+          company: "Hospitable",
+          title: "Senior Product Manager, Core",
+          location: "Remote, Portugal",
+          url: "https://apply.workable.com/hospitable/j/1",
+        }),
+      ],
+      new Set(),
+    )
+    const aggregator = await addSource({ label: "Startup Jobs", provider: "startup-jobs", token: "startup" })
+    await upsertJobs(
+      env,
+      aggregator,
+      [
+        job({
+          company: "Hospitable.com",
+          externalId: "2",
+          title: "Senior Product Manager, Core (USA/Europe - Remote)",
+          location: "Remote, Portugal",
+          url: "https://startup.jobs/hospitable-core",
+        }),
+      ],
+      new Set(),
+    )
+    const stored = await rows<{ duplicate_of: string | null }>(env, `SELECT duplicate_of FROM jobs ORDER BY duplicate_of IS NULL DESC`)
+    expect(stored).toHaveLength(2)
+    expect(stored[0]?.duplicate_of).toBeNull()
+    expect(stored[1]?.duplicate_of).toBeTruthy()
+  })
+
+  it("does not group Impact with impact.com when the role differs", async () => {
+    const source = await addSource()
+    await upsertJobs(
+      env,
+      source,
+      [
+        job({ company: "Impact", title: "Product Manager", url: "https://impact.com/jobs/1" }),
+        job({ company: "impact.com", externalId: "2", title: "Engineer", url: "https://impact.io/jobs/2" }),
+      ],
+      new Set(),
+    )
+    const stored = await rows<{ duplicate_of: string | null }>(env, `SELECT duplicate_of FROM jobs`)
+    expect(stored.every((row) => row.duplicate_of === null)).toBe(true)
+  })
+
   it("writes one row when the same opening appears twice in one slice", async () => {
     const source = await addSource()
     const written = await upsertJobs(

@@ -2,8 +2,10 @@ import { getAdapter } from "./adapters"
 import { bodyComesLater, fetchLateBody } from "./adapters/details"
 import { fetchWorkdayLocations, WORKDAY_PLACEHOLDER } from "./adapters/workday"
 import { boardRank } from "./boards"
-import { companyKey, companiesRelated, dedupKey, jobHash, roleKey, titleKey } from "./company-key"
-import { parsePlaces, placeCount, placesMatch } from "./places"
+import { companyKey, companyMatchKey, companiesRelated, dedupKey, domainsConflict, employerDomain, jobHash, roleKey, titleKey } from "./company-key"
+import { actionRank, blankPlaceKey } from "./dedup-group"
+import { readRepost, recentExactRepost, repostReason, titleMatch, writeFlags } from "./repost"
+import { isUnlocated, locationKey, parsePlaces, placeCount, placesMatch } from "./places"
 import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
 import { pick } from "./locale"
@@ -525,21 +527,21 @@ export async function upsertJobs(
     list.push(twin)
     byRole.set(twin.role_key, list)
   }
-  const protectedIds = new Set(
-    (
-      await selectIn<{ job_id: string }>(
-        env,
-        (list) => `SELECT DISTINCT job_id FROM user_jobs
-           WHERE job_id IN (${list})
-             AND (applied_at IS NOT NULL OR interviewed_at IS NOT NULL
-               OR TRIM(COALESCE(notes, '')) != ''
-               OR TRIM(COALESCE(cv_url, '')) != ''
-               OR TRIM(COALESCE(claude_comment, '')) != ''
-               OR COALESCE(status, 'new') NOT IN ('new', 'off_profile'))`,
-        [...new Set([...byRole.values()].flatMap((list) => list.map((row) => row.primary_id)))],
-      )
-    ).map((row) => row.job_id),
-  )
+  const statusRank = new Map<string, number>()
+  for (const row of await selectIn<{
+    job_id: string
+    status: string
+    later_at: string | null
+    viewed_at: string | null
+  }>(
+    env,
+    (list) => `SELECT job_id, status, later_at, viewed_at FROM user_jobs WHERE job_id IN (${list})`,
+    [...new Set([...byRole.values()].flatMap((list) => list.map((item) => item.primary_id)))],
+  )) {
+    const rank = actionRank(row)
+    const prev = statusRank.get(row.job_id) ?? 0
+    if (rank > prev) statusRank.set(row.job_id, rank)
+  }
 
   const usedTwins = new Set<string>()
   const relatedKeys = [
@@ -548,27 +550,109 @@ export async function upsertJobs(
     companyKey(source.token),
   ]
   const relatedTwins = await loadRelatedTwins(env, relatedKeys, source.kind === "company" ? "query" : "company")
+  const matchKeys = [
+    ...new Set(
+      wanted
+        .filter((row) => !present.has(row.id))
+        .map((row) => companyMatchKey(row.company))
+        .filter((key) => key.length >= 3),
+    ),
+  ]
+  const matchTwins =
+    matchKeys.length === 0
+      ? []
+      : await selectIn<TwinRow & { url: string; careers_url: string | null; company: string; provider: string }>(
+          env,
+          (list) => `SELECT j.id, j.role_key, j.dedup_key, j.company_key, j.company, j.title, j.location, j.url,
+             s.kind, s.provider, s.careers_url, j.first_seen_at, j.closed_at, j.duplicate_of,
+             COALESCE(p.id, j.id) AS primary_id,
+             COALESCE(p.location, j.location) AS primary_location,
+             COALESCE(sp.kind, s.kind) AS primary_kind,
+             COALESCE(sp.provider, s.provider) AS primary_provider,
+             COALESCE(p.closed_at, j.closed_at) AS primary_closed_at
+           FROM jobs j JOIN sources s ON s.id = j.source_id
+           LEFT JOIN jobs p ON p.id = j.duplicate_of
+           LEFT JOIN sources sp ON sp.id = p.source_id
+           WHERE j.closed_at IS NULL AND j.company_match_key IN (${list})`,
+          matchKeys,
+        )
+
+  const slicePlaces = new Map<string, Set<string>>()
+  for (const row of wanted) {
+    if (present.has(row.id) || !row.role) continue
+    const key = locationKey(row.job.location)
+    if (!key) continue
+    const set = slicePlaces.get(row.role) ?? new Set<string>()
+    set.add(key)
+    slicePlaces.set(row.role, set)
+  }
 
   function matchesPlace(row: TwinRow, place: ReturnType<typeof parsePlaces>): boolean {
     return placesMatch(place, parsePlaces(row.primary_location ?? row.location))
   }
 
-  function findTwin(role: string | null, key: string, opening: string | null, title: string, location: string | undefined): TwinRow | null {
+  function findTwin(
+    role: string | null,
+    key: string,
+    opening: string | null,
+    title: string,
+    location: string | undefined,
+    companyName: string,
+    jobUrl: string,
+  ): TwinRow | null {
     const words = titleKey(title)
     if (!words) return null
     const place = parsePlaces(location)
+    const incomingKey = locationKey(location)
     const sameRole = (role && byRole.get(role)) || []
-    const exact = opening ? sameRole.find((row) => row.dedup_key === opening && !usedTwins.has(row.id)) : undefined
+    const known = new Set<string>(slicePlaces.get(role ?? "") ?? [])
+    for (const row of sameRole) {
+      if (row.closed_at || row.primary_closed_at) continue
+      const placeKey = locationKey(row.primary_location ?? row.location)
+      if (placeKey) known.add(placeKey)
+    }
+    const onlyPlace = blankPlaceKey([...known])
+    const incomingBlank = incomingKey === "" && isUnlocated(location)
+    const blankJoins = (row: TwinRow) => {
+      const rowKey = locationKey(row.primary_location ?? row.location)
+      const rowBlank = rowKey === "" && isUnlocated(row.primary_location ?? row.location)
+      if (onlyPlace === null || (!incomingBlank && incomingKey !== onlyPlace) || (!rowBlank && rowKey !== onlyPlace)) return false
+      return incomingBlank || rowBlank
+    }
+    const placeOk = (row: TwinRow) => {
+      const rowKey = locationKey(row.primary_location ?? row.location)
+      if (incomingKey && incomingKey === rowKey) return true
+      if (matchesPlace(row, place)) return true
+      return blankJoins(row)
+    }
+    const sameKey = (row: TwinRow) => {
+      if (!opening || row.dedup_key !== opening) return false
+      if (incomingKey !== "" || onlyPlace !== null) return true
+      return locationKey(row.primary_location ?? row.location) === ""
+    }
     const found =
-      exact ??
-      sameRole.find((row) => !usedTwins.has(row.id) && matchesPlace(row, place)) ??
+      sameRole.find((row) => !usedTwins.has(row.id) && sameKey(row)) ??
+      sameRole.find((row) => !usedTwins.has(row.id) && placeOk(row)) ??
       relatedTwins.find(
         (row) =>
           !usedTwins.has(row.id) &&
           titleKey(row.title) === words &&
           companiesRelated(key, row.company_key) &&
-          ((opening !== null && row.dedup_key === opening) || matchesPlace(row, place)),
-      )
+          (sameKey(row) || placeOk(row)),
+      ) ??
+      matchTwins.find((row) => {
+        const mine = companyMatchKey(companyName)
+        const theirs = companyMatchKey(row.company)
+        if (!mine || mine !== theirs || mine.length < 3) return false
+        const mineDomain = employerDomain(source.provider, source.careers_url, jobUrl)
+        const theirDomain = employerDomain(row.provider, row.careers_url, row.url)
+        return (
+          !usedTwins.has(row.id) &&
+          titleKey(row.title) === words &&
+          !domainsConflict(mineDomain, theirDomain) &&
+          (sameKey(row) || placeOk(row))
+        )
+      })
     return found ?? null
   }
 
@@ -588,6 +672,7 @@ export async function upsertJobs(
   }
 
   const writes: D1PreparedStatement[] = []
+  const freshPrimaries: Array<{ id: string; company: string; title: string; url: string }> = []
   /** Openings already claimed by an earlier row of this same slice. */
   const claimed = new Set<string>()
   let jobsNew = 0
@@ -602,24 +687,60 @@ export async function upsertJobs(
     let inherit: TwinRow | null = null
     let duplicateOf: string | null = null
     let promote: TwinRow | null = null
+    let replacedPrimary: string | null = null
     if (!existing) {
-      const twin = findTwin(role, key, opening, job.title, job.location)
+      const twin = findTwin(role, key, opening, job.title, job.location, company, job.url)
       if (twin) {
-        const guarded = protectedIds.has(twin.primary_id)
         const incomingCount = placeCount(job.location)
         const currentCount = placeCount(twin.primary_location)
         const incomingRank = boardRank(source.provider)
         const currentRank = boardRank(twin.primary_provider)
         const fuller = incomingCount > currentCount && incomingRank === currentRank
         const strongerBoard = incomingRank > currentRank
+        const keptForStatus = (statusRank.get(twin.primary_id) ?? 0) > 0
         if (twin.closed_at && !twin.duplicate_of) {
           inherit = twin
           usedTwins.add(twin.id)
         } else if (twin.primary_closed_at) promote = twin
-        else if (!guarded && (fuller || strongerBoard)) promote = twin
+        else if (!keptForStatus && (fuller || strongerBoard)) promote = twin
         else duplicateOf = twin.primary_id
       }
+      replacedPrimary = promote?.primary_id ?? null
+      if (!duplicateOf) freshPrimaries.push({ id, company, title: job.title, url: job.url })
       if (opening) claimed.add(opening)
+      if (!duplicateOf && role) {
+        const list = byRole.get(role) ?? []
+        list.push({
+          id,
+          role_key: role,
+          dedup_key: opening,
+          company_key: key,
+          title: job.title,
+          location: job.location ?? null,
+          kind: source.kind,
+          first_seen_at: "9999-01-01 00:00:00",
+          closed_at: null,
+          duplicate_of: null,
+          primary_id: id,
+          primary_location: job.location ?? null,
+          primary_kind: source.kind,
+          primary_provider: source.provider,
+          primary_closed_at: null,
+        })
+        byRole.set(role, list)
+        if (replacedPrimary) {
+          for (const row of list) {
+            if (row.id !== id && row.primary_id === replacedPrimary) {
+              row.primary_id = id
+              row.primary_location = job.location ?? null
+              row.primary_provider = source.provider
+              row.primary_kind = source.kind
+              row.primary_closed_at = null
+              row.duplicate_of = id
+            }
+          }
+        }
+      }
     }
 
     if (!existing) {
@@ -631,11 +752,12 @@ export async function upsertJobs(
     const textChanged = body !== undefined && body.hash !== (storedHash.get(id) ?? null)
     writes.push(
       env.DB.prepare(
-        `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, location, url, posted_at, salary_min, salary_max, salary_currency, dedup_key, role_key, text_hash, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
+        `INSERT INTO jobs (id, source_id, external_id, company, company_key, company_match_key, title, location, url, posted_at, salary_min, salary_max, salary_currency, dedup_key, role_key, text_hash, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
          ON CONFLICT(id) DO UPDATE SET
            last_seen_at = datetime('now'),
            title = excluded.title,
+           company_match_key = excluded.company_match_key,
            location = excluded.location,
            dedup_key = excluded.dedup_key,
            role_key = excluded.role_key,
@@ -661,6 +783,7 @@ export async function upsertJobs(
         job.externalId,
         company,
         key,
+        companyMatchKey(company),
         job.title,
         job.location ?? null,
         job.url,
@@ -681,15 +804,15 @@ export async function upsertJobs(
       textsWritten += 1
     }
 
-    if (promote) {
+    if (promote && replacedPrimary) {
       writes.push(inheritFirstSeen(env, promote.first_seen_at, id))
-      writes.push(inheritUserJobs(env, promote.primary_id, id))
-      writes.push(env.DB.prepare(`UPDATE interview_stages SET job_id = ? WHERE job_id = ?`).bind(id, promote.primary_id))
+      writes.push(inheritUserJobs(env, replacedPrimary, id))
+      writes.push(env.DB.prepare(`UPDATE interview_stages SET job_id = ? WHERE job_id = ?`).bind(id, replacedPrimary))
       writes.push(
         env.DB.prepare(`UPDATE jobs SET duplicate_of = ? WHERE (id = ? OR duplicate_of = ?) AND id != ?`).bind(
           id,
-          promote.primary_id,
-          promote.primary_id,
+          replacedPrimary,
+          replacedPrimary,
           id,
         ),
       )
@@ -720,10 +843,148 @@ export async function upsertJobs(
   }
 
   await runBatch(env, writes)
+  await markReposts(env, freshPrimaries, source.careers_url)
   if (incoming.size > 0) {
     console.log(`job texts written ${textsWritten} of ${incoming.size} with a body, ${jobsNew} new`)
   }
   return jobsNew
+}
+
+type PreviousApplication = {
+  id: string
+  title: string
+  status: string
+  applied_at: string | null
+  interviewed_at: string | null
+}
+
+type LegacyApplication = {
+  company: string
+  title: string
+  status: string
+  applied_at: string | null
+  url: string | null
+}
+
+let legacyHistory: LegacyApplication[] | null = null
+let legacyOff = false
+let masterUserId: number | null | undefined
+const legacyJobByUrl = new Map<string, string | null>()
+
+/** The imported Agilefluent list has no user column. It belongs to the master account. */
+async function previousApplications(env: Bindings, userId: number, matchKey: string): Promise<PreviousApplication[]> {
+  const rows = await env.DB.prepare(
+    `SELECT j.id, j.title, uj.status, uj.applied_at, uj.interviewed_at
+     FROM jobs j
+     JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
+     WHERE j.company_match_key = ?
+       AND (uj.applied_at IS NOT NULL OR uj.status IN ('applied', 'interview', 'rejected'))
+     ORDER BY uj.applied_at DESC
+     LIMIT 80`,
+  )
+    .bind(userId, matchKey)
+    .all<PreviousApplication>()
+  const found = rows.results
+  if (masterUserId === undefined) {
+    const master = await env.DB.prepare(`SELECT id FROM users WHERE role = 'master' ORDER BY id LIMIT 1`).first<{ id: number }>()
+    masterUserId = master?.id ?? null
+  }
+  if (legacyOff || masterUserId !== userId) return found
+  if (!legacyHistory) {
+    try {
+      const loaded = await env.DB.prepare(
+        `SELECT company, title, status, applied_at, url
+         FROM applied_history
+         WHERE system = 'agilefluent'
+           AND (applied_at IS NOT NULL OR status IN ('applied', 'interview', 'rejected'))
+         LIMIT 500`,
+      ).all<LegacyApplication>()
+      legacyHistory = loaded.results
+    } catch {
+      legacyOff = true
+      legacyHistory = []
+      return found
+    }
+  }
+  for (const row of legacyHistory) {
+    if (!row.url || companyMatchKey(row.company) !== matchKey) continue
+    let id = legacyJobByUrl.get(row.url)
+    if (id === undefined) {
+      const job = await env.DB.prepare(
+        `SELECT id FROM jobs WHERE url = ? ORDER BY closed_at IS NOT NULL, duplicate_of IS NOT NULL LIMIT 1`,
+      )
+        .bind(row.url)
+        .first<{ id: string }>()
+      id = job?.id ?? null
+      legacyJobByUrl.set(row.url, id)
+    }
+    if (!id) continue
+    found.push({ id, title: row.title, status: row.status, applied_at: row.applied_at, interviewed_at: null })
+  }
+  return found
+}
+
+/** Marks a new primary when this person already applied to the same role here. Not a duplicate. */
+async function markReposts(
+  env: Bindings,
+  jobs: Array<{ id: string; company: string; title: string; url: string }>,
+  _careersUrl: string | null,
+): Promise<void> {
+  const fresh = jobs.filter((job) => companyMatchKey(job.company).length >= 3)
+  if (fresh.length === 0) return
+  const users = await env.DB.prepare(`SELECT id FROM users`).all<{ id: number }>()
+  const writes: D1PreparedStatement[] = []
+  for (const user of users.results) {
+    const cache = new Map<string, PreviousApplication[]>()
+    for (const job of fresh) {
+      const matchKey = companyMatchKey(job.company)
+      let previous = cache.get(matchKey)
+      if (!previous) {
+        previous = await previousApplications(env, user.id, matchKey)
+        cache.set(matchKey, previous)
+      }
+      const hit = previous
+        .map((item) => ({ item, kind: item.id === job.id ? null : titleMatch(job.title, item.title) }))
+        .filter((item): item is { item: PreviousApplication; kind: "exact" | "similar" } => item.kind !== null)
+        .sort((a, b) => {
+          if (a.kind !== b.kind) return a.kind === "exact" ? -1 : 1
+          return (b.item.applied_at ?? "") > (a.item.applied_at ?? "") ? 1 : -1
+        })[0]
+      if (!hit) continue
+      const status = hit.item.status === "interview" || hit.item.status === "rejected" ? hit.item.status : "applied"
+      const date = hit.item.applied_at ?? hit.item.interviewed_at ?? ""
+      if (!date) continue
+      const flags = writeFlags(null, { repost_of: hit.item.id, prev_status: status, prev_date: date, match: hit.kind })
+      const block = hit.kind === "exact" && recentExactRepost(flags)
+      writes.push(
+        env.DB.prepare(
+          `INSERT INTO user_jobs (user_id, job_id, status, score_reason, flags)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(user_id, job_id) DO UPDATE SET
+             flags = excluded.flags,
+             status = CASE
+               WHEN user_jobs.applied_at IS NOT NULL OR user_jobs.status IN ('applied', 'interview', 'rejected', 'saved')
+                 THEN user_jobs.status
+               WHEN ? = 1 AND user_jobs.score IS NULL THEN 'off_profile'
+               ELSE user_jobs.status
+             END,
+             score_reason = CASE
+               WHEN ? = 1 AND user_jobs.score IS NULL THEN excluded.score_reason
+               ELSE user_jobs.score_reason
+             END`,
+        ).bind(
+          user.id,
+          job.id,
+          block ? "off_profile" : "new",
+          block ? repostReason(date) : null,
+          flags,
+          block ? 1 : 0,
+          block ? 1 : 0,
+        ),
+      )
+    }
+  }
+  await runBatch(env, writes)
 }
 
 function inheritFirstSeen(env: Bindings, firstSeenAt: string, id: string): D1PreparedStatement {
@@ -954,6 +1215,7 @@ type Candidate = {
   url: string
   no_text: number
   dedup_key: string | null
+  flags: string | null
 }
 
 function parkOffProfile(env: Bindings, userId: number, ids: string[]): D1PreparedStatement[] {
@@ -962,7 +1224,8 @@ function parkOffProfile(env: Bindings, userId: number, ids: string[]): D1Prepare
       `INSERT INTO user_jobs (user_id, job_id, status, score, score_reason, flags)
        SELECT ?, id, 'off_profile', 0, 'prefilter', '[]' FROM jobs WHERE id IN (${placeholders(part.length)})
        ON CONFLICT(user_id, job_id) DO UPDATE SET
-         status = 'off_profile', score = 0, score_reason = 'prefilter', flags = '[]'`,
+         status = 'off_profile', score = 0, score_reason = 'prefilter',
+         flags = CASE WHEN COALESCE(user_jobs.flags, '') LIKE '%"repost_of"%' THEN user_jobs.flags ELSE '[]' END`,
     ).bind(userId, ...part),
   )
 }
@@ -974,7 +1237,7 @@ function verdictUpdate(env: Bindings, userId: number, id: string, verdict: Verdi
      ON CONFLICT(user_id, job_id) DO UPDATE SET
        score = excluded.score,
        score_reason = excluded.score_reason,
-       flags = excluded.flags,
+       flags = CASE WHEN COALESCE(user_jobs.flags, '') LIKE '%"repost_of"%' THEN user_jobs.flags ELSE excluded.flags END,
        scoring_claimed_at = NULL,
        scoring_claim_id = NULL,
        status = CASE WHEN user_jobs.status = 'off_profile' THEN 'new' ELSE user_jobs.status END`,
@@ -1060,7 +1323,7 @@ export async function prefilterAndScore(
   const windowDays = await scoreWindowDays(env, userId)
 
   const open = await env.DB.prepare(
-    `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, j.dedup_key,
+    `SELECT j.id, j.company, j.company_key, j.title, j.location, j.url, j.dedup_key, uj.flags,
             ${NO_TEXT} AS no_text
      FROM jobs j INDEXED BY idx_jobs_live
      ${JOB_TEXT_JOIN}
@@ -1089,12 +1352,26 @@ export async function prefilterAndScore(
   const rules = await resolveUserPrefilter(env, userId)
   const candidates: Candidate[] = []
   const dropIds: string[] = []
+  const repostIds: string[] = []
   for (const job of open.results) {
+    if (recentExactRepost(job.flags)) {
+      repostIds.push(job.id)
+      continue
+    }
     if (passesPrefilter(job.title, rules)) candidates.push(job)
     else dropIds.push(job.id)
   }
 
-  await runBatch(env, parkOffProfile(env, userId, dropIds))
+  await runBatch(env, [
+    ...parkOffProfile(env, userId, dropIds),
+    ...chunk(repostIds, 40).map((part) =>
+      env.DB.prepare(
+        `UPDATE user_jobs SET status = 'off_profile'
+         WHERE user_id = ? AND job_id IN (${placeholders(part.length)})
+           AND applied_at IS NULL AND status NOT IN ('applied', 'interview', 'rejected', 'saved')`,
+      ).bind(userId, ...part),
+    ),
+  ])
 
   const keys = [...new Set(candidates.map((job) => job.dedup_key).filter((key): key is string => Boolean(key)))]
   const verdicts = await inheritVerdicts(env, userId, keys)
@@ -1472,8 +1749,10 @@ export async function scoreJobsByIds(env: Bindings, ids: string[], userId: numbe
       `INSERT INTO user_jobs (user_id, job_id, status, score, score_reason, flags)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_id, job_id) DO UPDATE SET
-         score = excluded.score, score_reason = excluded.score_reason, flags = excluded.flags,
-         status = excluded.status`,
+         score = excluded.score, score_reason = excluded.score_reason,
+         flags = CASE WHEN COALESCE(user_jobs.flags, '') LIKE '%"repost_of"%' THEN user_jobs.flags ELSE excluded.flags END,
+         status = CASE WHEN COALESCE(user_jobs.flags, '') LIKE '%"repost_of"%' AND user_jobs.status = 'off_profile'
+           THEN user_jobs.status ELSE excluded.status END`,
     )
       .bind(userId, job.id, status, item.score, item.reason || null, flags)
       .run()
@@ -1593,11 +1872,11 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
 
   await env.DB.prepare(
     `INSERT INTO jobs (
-       id, source_id, external_id, company, company_key, title, location, url,
+       id, source_id, external_id, company, company_key, company_match_key, title, location, url,
        posted_at, salary_min, salary_max, salary_currency, dedup_key, role_key, text_hash,
        first_seen_at, last_seen_at, changed_at, closed_at, status
      ) VALUES (
-       ?, ?, ?, ?, ?, ?, ?, ?,
+       ?, ?, ?, ?, ?, ?, ?, ?, ?,
        NULL, ?, ?, ?, ?, ?, ?,
        datetime('now'), datetime('now'), datetime('now'), NULL, 'new'
      )
@@ -1605,6 +1884,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
        title = excluded.title,
        company = excluded.company,
        company_key = excluded.company_key,
+       company_match_key = excluded.company_match_key,
        location = excluded.location,
        salary_min = COALESCE(excluded.salary_min, jobs.salary_min),
        salary_max = COALESCE(excluded.salary_max, jobs.salary_max),
@@ -1622,6 +1902,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
       url,
       company,
       key,
+      companyMatchKey(company),
       title,
       input.location?.trim() || null,
       url,

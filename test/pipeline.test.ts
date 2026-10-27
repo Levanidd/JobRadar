@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 
-import { companyKey, companiesRelated, dedupKey, locationKey, titleKey } from "../src/company-key"
+import { careerDomain, companyKey, companyMatchKey, companiesRelated, dedupKey, domainsConflict, employerDomain, locationKey, titleKey } from "../src/company-key"
+import { recentExactRepost, titleMatch, writeFlags } from "../src/repost"
+import { appliedConflict, blankPlaceKey, choosePrimary, mergeVerdicts, type Verdict } from "../src/dedup-group"
 import { parsePlaces, placesMatch } from "../src/places"
 import { isSuspicious } from "../src/ingest"
 import { passesPrefilter, sanitizeTags } from "../src/prefilter"
@@ -34,6 +36,7 @@ describe("companyKey", () => {
     expect(titleKey("Product Manager (maternity cover)")).toBe("product manager maternity cover")
     expect(titleKey("Product Manager (Berlin)")).toBe("product manager")
     expect(titleKey("Senior Product Manager (all genders)")).toBe("senior product manager")
+    expect(titleKey("Senior Product Manager, Core (USA/Europe - Remote)")).toBe("senior product manager core")
   })
 })
 
@@ -50,6 +53,9 @@ describe("places", () => {
     expect(locationKey("Berlin, BE, Germany")).toBe("berlin+germany")
     expect(locationKey("München, BY, Germany")).toBe("germany+munich")
     expect(locationKey("Berlin, Germany")).toBe(locationKey("Berlin, BE, Germany"))
+    expect(locationKey("UK / Bulgaria / Malta / South Africa / Spain; Remote")).toBe(
+      "bulgaria+malta+south africa+spain+uk",
+    )
   })
 
   it("matches on a shared city and refuses a remote country", () => {
@@ -69,6 +75,147 @@ describe("places", () => {
     expect(placesMatch(parsePlaces(""), parsePlaces("Remote"))).toBe(false)
     expect(placesMatch(parsePlaces("Remote"), parsePlaces("Remote"))).toBe(false)
     expect(placesMatch(parsePlaces(""), parsePlaces(""))).toBe(true)
+  })
+})
+
+describe("company match key", () => {
+  it("drops a site or a holding from the end and keeps company_key strict", () => {
+    expect(companyMatchKey("Hospitable.com")).toBe("hospitable")
+    expect(companyMatchKey("Hospitable")).toBe(companyMatchKey("Hospitable.com"))
+    expect(companyMatchKey("Nelly Solutions")).toBe(companyMatchKey("Nelly"))
+    expect(companyMatchKey("Kraken.com")).toBe(companyMatchKey("Kraken"))
+    expect(companyKey("Hospitable.com")).not.toBe(companyKey("Hospitable"))
+  })
+
+  it("ignores an aggregator url when deciding the career domain", () => {
+    expect(employerDomain("startup-jobs", null, "https://startup.jobs/senior-product-manager-core")).toBeNull()
+    expect(employerDomain("workable", "https://apply.workable.com/hospitable", "https://apply.workable.com/hospitable/j/1")).toBe(
+      "apply.workable.com/hospitable",
+    )
+    expect(
+      domainsConflict(
+        employerDomain("workable", null, "https://apply.workable.com/hospitable/j/1"),
+        employerDomain("startup-jobs", null, "https://startup.jobs/hospitable"),
+      ),
+    ).toBe(false)
+  })
+
+  it("treats a different career domain as a different employer", () => {
+    expect(domainsConflict(careerDomain("https://impact.com/jobs/1"), careerDomain("https://impact.io/jobs/1"))).toBe(true)
+    expect(
+      domainsConflict(
+        careerDomain("https://job-boards.greenhouse.io/hospitable/jobs/1"),
+        careerDomain("https://boards.greenhouse.io/hospitable/jobs/2"),
+      ),
+    ).toBe(false)
+  })
+})
+
+describe("repost flag", () => {
+  it("calls the same role exact and a seniority change similar", () => {
+    expect(titleMatch("Senior Product Owner (m/f/d)", "Senior Product Owner")).toBe("exact")
+    expect(titleMatch("Senior Product Owner", "Product Owner")).toBe("similar")
+    expect(titleMatch("Senior Product Owner", "Account Executive")).toBeNull()
+  })
+
+  it("skips scoring only for an exact repost from the last 60 days", () => {
+    const flags = writeFlags(null, {
+      repost_of: "old",
+      prev_status: "applied",
+      prev_date: "2026-10-06 07:18:20",
+      match: "exact",
+    })
+    expect(recentExactRepost(flags, Date.parse("2026-10-27T12:00:00Z"))).toBe(true)
+    const old = writeFlags(null, {
+      repost_of: "old",
+      prev_status: "rejected",
+      prev_date: "2026-01-01 00:00:00",
+      match: "exact",
+    })
+    expect(recentExactRepost(old, Date.parse("2026-10-27T12:00:00Z"))).toBe(false)
+  })
+})
+
+describe("dedup group", () => {
+  const verdict = (over: Partial<Verdict>): Verdict => ({
+    user_id: 1,
+    job_id: "a",
+    status: "new",
+    score: null,
+    score_reason: null,
+    flags: null,
+    notes: null,
+    applied_at: null,
+    viewed_at: null,
+    later_at: null,
+    notified_at: null,
+    interviewed_at: null,
+    cv_url: null,
+    claude_comment: null,
+    ...over,
+  })
+
+  it("joins a blank place only when the group has one location", () => {
+    expect(blankPlaceKey(["berlin+germany"])).toBe("berlin+germany")
+    expect(blankPlaceKey(["berlin+germany", "berlin+germany", ""])).toBe("berlin+germany")
+    expect(blankPlaceKey(["berlin+germany", "london+uk"])).toBeNull()
+    expect(blankPlaceKey(["", ""])).toBeNull()
+  })
+
+  it("keeps two applications more than two days apart apart", () => {
+    expect(
+      appliedConflict([
+        verdict({ job_id: "a", applied_at: "2026-10-12 09:00:00" }),
+        verdict({ job_id: "b", applied_at: "2026-10-15 09:00:00" }),
+      ])?.userId,
+    ).toBe(1)
+    expect(
+      appliedConflict([
+        verdict({ job_id: "a", applied_at: "2026-10-12 09:00:00" }),
+        verdict({ job_id: "b", applied_at: "2026-10-14 09:00:00" }),
+      ]),
+    ).toBeNull()
+  })
+
+  it("merges the furthest status onto the primary and keeps both comments", () => {
+    const merged = mergeVerdicts("ats", [
+      verdict({
+        job_id: "ats",
+        status: "rejected",
+        applied_at: "2026-10-12 09:00:00",
+        cv_url: "https://cv.example/a",
+      }),
+      verdict({
+        job_id: "board",
+        status: "new",
+        score: 94,
+        score_reason: "strong",
+        cv_url: "https://cv.example/a",
+        claude_comment: "[auto-review]",
+      }),
+    ])
+    expect(merged).toEqual([
+      expect.objectContaining({
+        job_id: "ats",
+        status: "rejected",
+        applied_at: "2026-10-12 09:00:00",
+        cv_url: "https://cv.example/a",
+        claude_comment: "[auto-review]",
+        score: 94,
+        score_reason: "strong",
+      }),
+    ])
+  })
+
+  it("picks the applied listing over a fuller career-site copy", () => {
+    const primary = choosePrimary(
+      [
+        { id: "board", location: null, first_seen_at: "2026-10-01 00:00:00", provider: "arbeitnow" },
+        { id: "ats", location: "Berlin, Germany", first_seen_at: "2026-10-02 00:00:00", provider: "greenhouse" },
+      ],
+      [verdict({ job_id: "ats", status: "rejected", applied_at: "2026-10-12 09:00:00" })],
+    )
+    expect(primary.id).toBe("ats")
   })
 })
 

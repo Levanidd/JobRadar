@@ -273,6 +273,88 @@ const COUNTRIES: Record<string, string> = {
   australia: "australia",
   uae: "uae",
   "united arab emirates": "uae",
+  bulgaria: "bulgaria",
+  bulgarien: "bulgaria",
+  bg: "bulgaria",
+  malta: "malta",
+  "south africa": "south africa",
+  südafrika: "south africa",
+  suedafrika: "south africa",
+  za: "south africa",
+  cyprus: "cyprus",
+  zypern: "cyprus",
+  cy: "cyprus",
+  serbia: "serbia",
+  serbien: "serbia",
+  rs: "serbia",
+  croatia: "croatia",
+  kroatien: "croatia",
+  hr: "croatia",
+  slovenia: "slovenia",
+  slowenien: "slovenia",
+  si: "slovenia",
+  slovakia: "slovakia",
+  slowakei: "slovakia",
+  sk: "slovakia",
+  estonia: "estonia",
+  estland: "estonia",
+  ee: "estonia",
+  latvia: "latvia",
+  lettland: "latvia",
+  lv: "latvia",
+  lithuania: "lithuania",
+  litauen: "lithuania",
+  lt: "lithuania",
+  luxembourg: "luxembourg",
+  luxemburg: "luxembourg",
+  lu: "luxembourg",
+  iceland: "iceland",
+  island: "iceland",
+  is: "iceland",
+  turkey: "turkey",
+  türkei: "turkey",
+  tuerkei: "turkey",
+  tr: "turkey",
+  "saudi arabia": "saudi arabia",
+  saudi: "saudi arabia",
+  sa: "saudi arabia",
+  egypt: "egypt",
+  ägypten: "egypt",
+  aegypten: "egypt",
+  eg: "egypt",
+  nigeria: "nigeria",
+  ng: "nigeria",
+  kenya: "kenya",
+  kenia: "kenya",
+  ke: "kenya",
+  brazil: "brazil",
+  brasilien: "brazil",
+  br: "brazil",
+  mexico: "mexico",
+  mexiko: "mexico",
+  mx: "mexico",
+  argentina: "argentina",
+  chile: "chile",
+  cl: "chile",
+  colombia: "colombia",
+  "new zealand": "new zealand",
+  neuseeland: "new zealand",
+  nz: "new zealand",
+  "south korea": "south korea",
+  korea: "south korea",
+  südkorea: "south korea",
+  suedkorea: "south korea",
+  kr: "south korea",
+  philippines: "philippines",
+  philippinen: "philippines",
+  ph: "philippines",
+  vietnam: "vietnam",
+  vn: "vietnam",
+  indonesia: "indonesia",
+  indonesien: "indonesia",
+  malaysia: "malaysia",
+  my: "malaysia",
+  thailand: "thailand",
 }
 
 /** Too wide to prove two postings are the same opening. */
@@ -433,12 +515,18 @@ export function placesMatch(left: PlaceSet, right: PlaceSet): boolean {
   return countrySide.countries.some((country) => citySide.cities.every((city) => cityInCountry(city, country)))
 }
 
+/** A missing location. "Remote" and an unknown town are not missing. */
+export function isUnlocated(location: string | null | undefined): boolean {
+  if (!location?.trim() || PLACEHOLDER.test(location.trim())) return true
+  return false
+}
+
 /** True when the text names only a place or a way of working, so a title may drop it. */
 export function isPlaceOnly(text: string): boolean {
   const words = text
     .toLowerCase()
     .replace(/[()]/g, " ")
-    .replace(/-/g, " ")
+    .replace(/[-/]/g, " ")
     .replace(/\bon site\b/g, " ")
     .split(/\s+/)
     .filter(Boolean)

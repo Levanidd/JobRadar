@@ -81,7 +81,11 @@ export async function jobFilters(c: Ctx, withCompanies: boolean, anchored = fals
     clauses.push(`${statusExpr} = ?`)
     binds.push(status)
   } else if (!status) {
-    clauses.push(`${statusExpr} NOT IN ('ignored', 'off_profile')`)
+    // A recent exact repost is off_profile so it is not scored, and it stays
+    // in the list: it is a different posting, not a duplicate.
+    clauses.push(
+      `(${statusExpr} NOT IN ('ignored', 'off_profile') OR COALESCE(uj.flags, '') LIKE '%"repost_of"%')`,
+    )
   }
 
   const minScore = Number(c.req.query("min_score") ?? 0)
