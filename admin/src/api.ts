@@ -279,6 +279,14 @@ export const api = {
     return request(`/applied${query ? `?${query}` : ""}`)
   },
 
+  appliedCompanies(status?: string, interviewed?: "yes" | "no"): Promise<{ companies: { company: string; jobs: number }[] }> {
+    const params = new URLSearchParams()
+    if (status) params.set("status", status)
+    if (interviewed) params.set("interviewed", interviewed)
+    const query = params.toString()
+    return request(`/applied/companies${query ? `?${query}` : ""}`)
+  },
+
   stats(days?: number): Promise<JobStats> {
     return request(days ? `/stats?days=${days}` : "/stats")
   },
