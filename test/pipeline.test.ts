@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { companyKey, companiesRelated, titleKey } from "../src/company-key"
+import { companyKey, companiesRelated, dedupKey, locationKey, titleKey } from "../src/company-key"
 import { isSuspicious } from "../src/ingest"
 import { passesPrefilter, sanitizeTags } from "../src/prefilter"
 import { sanitizeCompanyBlacklist } from "../src/settings"
@@ -24,6 +24,43 @@ describe("companyKey", () => {
     expect(titleKey("Senior Product Manager (m/w/d) – Berlin")).toBe("senior product manager")
     expect(titleKey("Sr. Product Manager")).toBe("senior product manager")
     expect(titleKey("Product Manager - Growth")).toBe("product manager growth")
+  })
+})
+
+describe("locationKey", () => {
+  it("treats the same city spelled with a country code as one place", () => {
+    const berlin = "berlin+germany"
+    expect(locationKey("Berlin, Germany; Berlin")).toBe(berlin)
+    expect(locationKey("Berlin, Germany")).toBe(berlin)
+    expect(locationKey("Berlin, DEU")).toBe(berlin)
+  })
+
+  it("keeps different cities apart, including a remote country", () => {
+    expect(locationKey("London, UK")).toBe("london+uk")
+    expect(locationKey("London, United Kingdom")).toBe("london+uk")
+    expect(locationKey("New York, NY")).toBe("new york")
+    expect(locationKey("NYC")).toBe("new york")
+    expect(locationKey("Remote (Germany)")).toBe("germany")
+    expect(locationKey("Berlin, Germany")).not.toBe(locationKey("London, UK"))
+    expect(locationKey("Berlin, Germany")).not.toBe(locationKey("New York, NY"))
+    expect(locationKey("Remote (Germany)")).not.toBe(locationKey("Berlin, Germany"))
+    expect(locationKey("Palo Alto")).toBe("palo alto")
+    expect(locationKey("San Francisco, CA")).toBe("san francisco")
+    expect(locationKey("München")).toBe("munich")
+    expect(locationKey("Remote")).toBe("")
+    expect(locationKey("")).toBe("")
+  })
+})
+
+describe("dedupKey", () => {
+  it("includes the place, and omits it only when the place is unknown", () => {
+    const role = "Senior Product Manager, Payments"
+    expect(dedupKey("Navan", role, "Berlin, Germany")).toBe("navan|senior product manager payments|berlin+germany")
+    expect(dedupKey("Navan", role, "London, UK; London")).toBe("navan|senior product manager payments|london+uk")
+    expect(dedupKey("Navan", role, "London, United Kingdom")).toBe("navan|senior product manager payments|london+uk")
+    expect(dedupKey("Navan", role, "New York, NY")).toBe("navan|senior product manager payments|new york")
+    expect(dedupKey("Navan", role)).toBe("navan|senior product manager payments")
+    expect(dedupKey("Navan", role, "Berlin, Germany")).not.toBe(dedupKey("Navan", role, "London, UK"))
   })
 })
 

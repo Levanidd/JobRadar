@@ -3,6 +3,7 @@ import { Hono } from "hono"
 import { currentUser, masterGuard } from "../auth"
 import { message } from "../errors"
 import { placeholders } from "../db"
+import { rekeyDedupBatch, unlinkDedupBatch } from "../dedup-rekey"
 import { createManualJob, scoreJobsByIds, scoreOneJob, setPrimaryListing } from "../ingest"
 import { backfillJobTexts, backfillTextHashes, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "../job-text"
 import { QuotaError } from "../quota"
@@ -235,6 +236,20 @@ jobs.get("/api/jobs", async (c) => {
     has_more: hasMore,
     next_offset: nextOffset,
   })
+})
+
+/** Rewrites open dedup keys, then unlinks copies that are no longer the same place. Master only. */
+jobs.post("/api/jobs/rekey-dedup", async (c) => {
+  const denied = masterGuard(c)
+  if (denied) return denied
+  const phase = c.req.query("phase") ?? "keys"
+  const after = Number(c.req.query("after") ?? 0)
+  const limit = Number(c.req.query("limit") ?? 200)
+  if (phase !== "keys" && phase !== "links") return c.json({ error: "phase must be keys or links" }, 400)
+  if (!Number.isFinite(after) || after < 0) return c.json({ error: "after must be a rowid" }, 400)
+  if (!Number.isFinite(limit) || limit < 1) return c.json({ error: "limit must be at least 1" }, 400)
+  const result = phase === "links" ? await unlinkDedupBatch(c.env, after, limit) : await rekeyDedupBatch(c.env, after, limit)
+  return c.json({ phase, ...result })
 })
 
 /** Fills jobs.text_hash from job_texts. Master only. Call again with the returned rowid until it is 0. */

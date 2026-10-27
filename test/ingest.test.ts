@@ -59,7 +59,7 @@ describe("upsertJobs", () => {
       company: "Acme GmbH",
       company_key: "acme",
       status: "new",
-      dedup_key: "acme|senior product manager",
+      dedup_key: "acme|senior product manager|berlin",
     })
   })
 
@@ -148,6 +148,30 @@ describe("upsertJobs", () => {
 
     await upsertJobs(env, source, [job()], new Set(["acme"]))
     expect(await one(env, `SELECT hits FROM discovered_companies`)).toMatchObject({ hits: 1 })
+  })
+
+  it("keeps the same role in another city as its own job", async () => {
+    const source = await addSource()
+    const written = await upsertJobs(
+      env,
+      source,
+      [
+        job({ externalId: "berlin", location: "Berlin, Germany", url: "https://acme.example/berlin" }),
+        job({ externalId: "london", location: "London, UK", url: "https://acme.example/london" }),
+        job({ externalId: "remote", location: "Remote (Germany)", url: "https://acme.example/remote" }),
+      ],
+      new Set(),
+    )
+    expect(written).toBe(3)
+    const stored = await rows<{ location: string; duplicate_of: string | null }>(
+      env,
+      `SELECT location, duplicate_of FROM jobs ORDER BY location`,
+    )
+    expect(stored).toEqual([
+      { location: "Berlin, Germany", duplicate_of: null },
+      { location: "London, UK", duplicate_of: null },
+      { location: "Remote (Germany)", duplicate_of: null },
+    ])
   })
 
   it("writes one row when the same opening appears twice in one slice", async () => {
@@ -457,6 +481,27 @@ describe("prefilterAndScore", () => {
       TEST_USER_ID,
     )
     expect(scores.every((row) => row.score === judged?.score)).toBe(true)
+  })
+
+  it("scores the same role in another city on its own", async () => {
+    const source = await addSource()
+    await upsertJobs(
+      env,
+      source,
+      [
+        job({ externalId: "berlin", location: "Berlin, Germany", url: "https://acme.example/berlin" }),
+        job({ externalId: "london", location: "London, UK", url: "https://acme.example/london" }),
+      ],
+      new Set(),
+    )
+    const step = await prefilterAndScore(env, TEST_USER_ID)
+    expect(step.scored).toBe(2)
+    const scores = await rows<{ location: string; score: number }>(
+      env,
+      `SELECT j.location, uj.score FROM jobs j JOIN user_jobs uj ON uj.job_id = j.id ORDER BY j.location`,
+    )
+    expect(scores).toHaveLength(2)
+    expect(scores.every((row) => row.score > 0)).toBe(true)
   })
 
   it("honours the batch limit and reports what is left", async () => {

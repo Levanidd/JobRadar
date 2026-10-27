@@ -1,6 +1,6 @@
 import { getAdapter } from "./adapters"
 import { bodyComesLater, fetchLateBody } from "./adapters/details"
-import { companyKey, companiesRelated, dedupKey, jobHash, titleKey } from "./company-key"
+import { companyKey, companiesRelated, dedupKey, jobHash, locationKey, titleKey } from "./company-key"
 import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
 import { pick } from "./locale"
@@ -84,7 +84,7 @@ async function loadRelatedTwins(env: Bindings, keys: string[], kind: "query" | "
       ...part.map(() => `(j.company_key >= ? AND j.company_key < ?)`),
     ].join(" OR ")
     const res = await env.DB.prepare(
-      `SELECT j.id, j.company_key, j.title, s.kind, j.first_seen_at, j.closed_at, j.duplicate_of
+      `SELECT j.id, j.company_key, j.title, j.location, s.kind, j.first_seen_at, j.closed_at, j.duplicate_of
        FROM jobs j JOIN sources s ON s.id = j.source_id
        WHERE s.kind = ? AND (${clause})
        ORDER BY j.closed_at IS NULL DESC, j.closed_at DESC`,
@@ -248,6 +248,7 @@ type TwinRow = {
   closed_at: string | null
   company_key: string
   title: string
+  location: string | null
   duplicate_of: string | null
 }
 
@@ -329,7 +330,7 @@ export async function upsertJobs(
         job,
         company,
         key: companyKey(company),
-        opening: dedupKey(company, job.title) || null,
+        opening: dedupKey(company, job.title, job.location) || null,
         id: await jobHash(source.provider, source.token, job.externalId),
       }
     }),
@@ -351,7 +352,7 @@ export async function upsertJobs(
   // by then. A live twin still wins over a retired one.
   for (const twin of await selectIn<TwinRow & { dedup_key: string }>(
     env,
-    (list) => `SELECT j.id, j.dedup_key, j.company_key, j.title, s.kind, j.first_seen_at, j.closed_at, j.duplicate_of
+    (list) => `SELECT j.id, j.dedup_key, j.company_key, j.title, j.location, s.kind, j.first_seen_at, j.closed_at, j.duplicate_of
        FROM jobs j JOIN sources s ON s.id = j.source_id
        WHERE j.dedup_key IN (${list})
        ORDER BY j.closed_at IS NULL DESC, j.closed_at DESC`,
@@ -368,17 +369,21 @@ export async function upsertJobs(
   ]
   const relatedTwins = await loadRelatedTwins(env, relatedKeys, source.kind === "company" ? "query" : "company")
 
-  function findTwin(opening: string | null, key: string, title: string): TwinRow | null {
+  function findTwin(opening: string | null, key: string, title: string, location: string | undefined): TwinRow | null {
     if (opening) {
       const exact = twins.get(opening)
       if (exact && !usedTwins.has(exact.id)) return exact
     }
     const role = titleKey(title)
     if (!role) return null
+    const place = locationKey(location)
     return (
-      relatedTwins.find(
-        (row) => !usedTwins.has(row.id) && titleKey(row.title) === role && companiesRelated(key, row.company_key),
-      ) ?? null
+      relatedTwins.find((row) => {
+        if (usedTwins.has(row.id) || titleKey(row.title) !== role || !companiesRelated(key, row.company_key)) return false
+        // An unknown place matches only another unknown place. A city never
+        // absorbs a remote-country listing, or the other way around.
+        return locationKey(row.location) === place
+      }) ?? null
     )
   }
 
@@ -405,14 +410,14 @@ export async function upsertJobs(
 
   for (const { job, company, key, opening, id } of wanted) {
     const existing = present.has(id)
-    // Two copies of one opening on the same board: the first one wins, exactly
-    // as it did when each row looked itself up against the rows written before it.
+    // Two copies of one opening — same company, role and place — on the same
+    // board: the first one wins. A second city is a different opening.
     if (opening && !existing && claimed.has(opening)) continue
 
     let inherit: TwinRow | null = null
     let duplicateOf: string | null = null
     if (!existing) {
-      const twin = findTwin(opening, key, job.title)
+      const twin = findTwin(opening, key, job.title, job.location)
       if (twin) {
         usedTwins.add(twin.id)
         if (opening) twins.delete(opening)
@@ -1358,7 +1363,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
   const sourceId = await ensureManualSource(env)
   const id = await jobHash("manual", "manual", url)
   const key = companyKey(company)
-  const opening = dedupKey(company, title) || null
+  const opening = dedupKey(company, title, input.location) || null
   const description = clipDescription(input.description) ?? null
   const hash = description ? await textHash(description) : null
   const notes = input.notes?.trim() || null

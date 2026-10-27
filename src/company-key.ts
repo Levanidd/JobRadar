@@ -46,15 +46,82 @@ export function titleKey(title: string): string {
 }
 
 /**
- * Identifies one opening across the boards that carry it. A role reaches us
- * from the employer's own board and from every aggregator that scraped it, and
- * those copies share nothing reliable — not the URL, not the id — except who
- * is hiring and for what.
+ * Spelling variants of one place. The value is the token that lands in the key.
+ * Add a line here when a new alias shows up; do not special-case it in the parser.
  */
-export function dedupKey(company: string, title: string): string {
+const PLACE_ALIASES: Record<string, string> = {
+  "münchen": "munich",
+  muenchen: "munich",
+  munchen: "munich",
+  "köln": "cologne",
+  koeln: "cologne",
+  koln: "cologne",
+  deu: "germany",
+  de: "germany",
+  deutschland: "germany",
+  "united kingdom": "uk",
+  "great britain": "uk",
+  gb: "uk",
+  england: "uk",
+  "new york city": "new york",
+  nyc: "new york",
+}
+
+/** Workplace words. They describe how someone works, not where the role is. */
+const PLACE_NOISE = new Set(["remote", "hybrid", "onsite", "office"])
+
+/**
+ * US state abbreviations. Dropped only when a city or country token is also
+ * present, so "New York, NY" is New York and a bare "NY" is left alone.
+ */
+const STATE_CODES = new Set(
+  "al ak az ar ca co ct dc fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy".split(
+    " ",
+  ),
+)
+
+function placeToken(segment: string): string {
+  const words = segment
+    .replace(/-/g, " ")
+    .replace(/\bon site\b/g, " ")
+    .split(/\s+/)
+    .filter((word) => word && !PLACE_NOISE.has(word))
+  const phrase = words.join(" ")
+  if (!phrase) return ""
+  return PLACE_ALIASES[phrase] ?? phrase
+}
+
+/**
+ * The places a posting names, so the same role in two cities stays two jobs.
+ * An empty string means we do not know where it is: that copy may only match
+ * another copy that is also missing a place.
+ */
+export function locationKey(location: string | null | undefined): string {
+  if (!location?.trim()) return ""
+  const text = location.toLowerCase().replace(/[()]/g, " ").replace(/\s+/g, " ").trim()
+  const tokens = new Set<string>()
+  for (const segment of text.split(/\s*(?:[;,/|]|\bor\b)\s*/)) {
+    const token = placeToken(segment.trim())
+    if (token) tokens.add(token)
+  }
+  const places = [...tokens].filter((token) => !STATE_CODES.has(token))
+  const kept = places.length > 0 ? places : [...tokens]
+  kept.sort()
+  return kept.join("+")
+}
+
+/**
+ * Identifies one opening across the boards that carry it. A role reaches us
+ * from the employer's own board and from every aggregator that scraped it.
+ * The same role in another city is a different opening. A missing location
+ * only matches another missing location.
+ */
+export function dedupKey(company: string, title: string, location?: string | null): string {
   const role = titleKey(title)
   const who = companyKey(company)
-  return who && role ? `${who}|${role}` : ""
+  if (!who || !role) return ""
+  const place = locationKey(location)
+  return place ? `${who}|${role}|${place}` : `${who}|${role}`
 }
 
 export async function jobHash(provider: string, token: string, externalId: string): Promise<string> {
