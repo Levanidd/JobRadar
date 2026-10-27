@@ -108,6 +108,22 @@ function readStage(body: Record<string, unknown>, partial: boolean): { title?: s
   return out
 }
 
+jobs.get("/api/applied/companies", async (c) => {
+  const userId = currentUser(c).id
+  const { clauses, binds } = await appliedFilters(c, { company: false })
+  const rows = await c.env.DB.prepare(
+    `SELECT j.company AS company, COUNT(*) AS jobs
+     FROM user_jobs uj
+     CROSS JOIN jobs j ON j.id = uj.job_id
+     WHERE uj.user_id = ? AND ${clauses} AND j.company != ''
+     GROUP BY j.company
+     ORDER BY j.company COLLATE NOCASE`,
+  )
+    .bind(userId, ...binds)
+    .all<{ company: string; jobs: number }>()
+  return c.json({ companies: rows.results })
+})
+
 jobs.get("/api/applied", async (c) => {
   const userId = currentUser(c).id
   const { clauses, binds } = await appliedFilters(c)

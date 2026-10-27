@@ -485,17 +485,24 @@ describe("applied", () => {
       }),
     })
 
-    const bank = await call("/api/applied?company=bank")
+    const bank = await call("/api/applied?company=Beispiel%20Bank%20AG")
     expect(bank.body.jobs).toHaveLength(1)
     expect(bank.body.jobs[0].company).toBe("Beispiel Bank AG")
 
-    const other = await call("/api/applied?company=OTHER")
+    const other = await call("/api/applied?company=Other%20GmbH")
     expect(other.body.jobs).toHaveLength(1)
     expect(other.body.jobs[0].company).toBe("Other GmbH")
 
-    // A percent sign is part of the name, not a wildcard that returns everyone.
+    expect((await call("/api/applied?company=bank")).body.jobs).toHaveLength(0)
     expect((await call("/api/applied?company=%")).body.jobs).toHaveLength(0)
     expect((await call("/api/applied?company=  ")).body.jobs).toHaveLength(2)
+
+    const names = await call("/api/applied/companies")
+    expect(names.body.companies.map((item: { company: string }) => item.company)).toEqual([
+      "Beispiel Bank AG",
+      "Other GmbH",
+    ])
+    expect((await call("/api/applied/companies?status=interview")).body.companies).toEqual([])
   })
 
   it("rejects a manual role without a usable link", async () => {

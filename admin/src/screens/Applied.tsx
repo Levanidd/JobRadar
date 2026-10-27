@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useLoader } from "../app-context"
@@ -298,11 +298,11 @@ export function Applied({
   const [sort, setSort] = usePersistentState<AppliedSort | null>("applied.sort", null, reviveSort)
   const [dir, setDir] = usePersistentState<"asc" | "desc">("applied.dir", "desc", oneOf("asc", "desc"))
   const [company, setCompany] = usePersistentState("applied.company", "", text)
-  // The request uses the debounced name, so typing does not blank the table.
-  const companyQueryRef = useRef(company.trim())
-  const [companyTick, setCompanyTick] = useState(0)
+  const [companies, setCompanies] = useState<{ company: string; jobs: number }[]>([])
   const [listedCompany, setListedCompany] = useState(company.trim())
   const request = useRef(0)
+  const companyRef = useRef(company)
+  companyRef.current = company
 
   const rows = useMemo(() => {
     if (!jobs || !sort) return jobs
@@ -327,7 +327,7 @@ export function Applied({
       if (!silent) setJobs(null)
       const token = ++request.current
       const interviewedFilter = status === "rejected" && interviewed ? interviewed : undefined
-      const name = companyQueryRef.current
+      const name = company.trim()
       const result = await run(() => api.applied(status || undefined, interviewedFilter, name || undefined))
       if (token !== request.current) return
       if (result) {
@@ -335,20 +335,20 @@ export function Applied({
         setJobs(result.jobs)
       }
     },
-    [run, status, interviewed],
+    [run, status, interviewed, company],
   )
 
-  useLoader(load, companyTick)
+  const loadCompanies = useCallback(async () => {
+    const interviewedFilter = status === "rejected" && interviewed ? interviewed : undefined
+    const result = await run(() => api.appliedCompanies(status || undefined, interviewedFilter))
+    if (!result) return
+    setCompanies(result.companies)
+    const picked = companyRef.current.trim()
+    if (picked && !result.companies.some((item) => item.company === picked)) setCompany("")
+  }, [run, status, interviewed, setCompany])
 
-  useEffect(() => {
-    const next = company.trim()
-    if (next === companyQueryRef.current) return
-    const handle = window.setTimeout(() => {
-      companyQueryRef.current = next
-      setCompanyTick((tick) => tick + 1)
-    }, 200)
-    return () => window.clearTimeout(handle)
-  }, [company])
+  useLoader(load)
+  useLoader(loadCompanies)
 
   async function openCard(job: Job) {
     setOpen(job)
@@ -451,17 +451,22 @@ export function Applied({
             <option value="no">{t("No interview")}</option>
           </select>
         ) : null}
-        <input
-          className="input input-inline"
-          type="search"
-          placeholder={t("Company name")}
-          aria-label={t("Company name")}
-          value={company}
-          onChange={(event) => setCompany(event.target.value)}
-        />
         <button className="btn btn-primary btn-sm" onClick={() => setComposing(true)}>
           {t("Add a job")}
         </button>
+        <select
+          className="select select-inline applied-company"
+          aria-label={t("Company")}
+          value={companies.some((item) => item.company === company) ? company : ""}
+          onChange={(event) => setCompany(event.target.value)}
+        >
+          <option value="">{t("All companies")}</option>
+          {companies.map((item) => (
+            <option key={item.company} value={item.company}>
+              {item.company}
+            </option>
+          ))}
+        </select>
       </div>
 
       {rows?.length ? (
