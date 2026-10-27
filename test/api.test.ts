@@ -485,15 +485,14 @@ describe("applied", () => {
       }),
     })
 
-    const bank = await call("/api/applied?company=Beispiel%20Bank%20AG")
+    const bank = await call("/api/applied?company=bank")
     expect(bank.body.jobs).toHaveLength(1)
     expect(bank.body.jobs[0].company).toBe("Beispiel Bank AG")
 
-    const other = await call("/api/applied?company=Other%20GmbH")
+    const other = await call("/api/applied?company=OTHER")
     expect(other.body.jobs).toHaveLength(1)
     expect(other.body.jobs[0].company).toBe("Other GmbH")
 
-    expect((await call("/api/applied?company=bank")).body.jobs).toHaveLength(0)
     expect((await call("/api/applied?company=%")).body.jobs).toHaveLength(0)
     expect((await call("/api/applied?company=  ")).body.jobs).toHaveLength(2)
 

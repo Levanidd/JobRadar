@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { api } from "../api"
 import { useAction, useLoader } from "../app-context"
@@ -269,6 +269,90 @@ function ManualJobForm({ onCreated, onCancel }: { onCreated: (job: Job) => void;
   )
 }
 
+function CompanyMenu({
+  value,
+  companies,
+  onChange,
+}: {
+  value: string
+  companies: { company: string }[]
+  onChange: (value: string) => void
+}) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  const needle = value.trim().toLowerCase()
+  const visible = needle
+    ? companies.filter((item) => item.company.toLowerCase().includes(needle))
+    : companies
+
+  useEffect(() => {
+    if (!open) return
+    function onPointer(event: MouseEvent) {
+      if (!box.current?.contains(event.target as Node)) setOpen(false)
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("mousedown", onPointer)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("mousedown", onPointer)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="applied-company" ref={box}>
+      <input
+        className="input"
+        type="search"
+        placeholder={t("All companies")}
+        aria-label={t("Company")}
+        aria-expanded={open}
+        value={value}
+        onFocus={() => setOpen(true)}
+        onChange={(event) => {
+          onChange(event.target.value)
+          setOpen(true)
+        }}
+      />
+      {open ? (
+        <div className="applied-company-menu" role="listbox">
+          <button
+            type="button"
+            className="applied-company-option"
+            onClick={() => {
+              onChange("")
+              setOpen(false)
+            }}
+          >
+            {t("All companies")}
+          </button>
+          {visible.length === 0 ? (
+            <p className="muted multiselect-empty">{t("No results")}</p>
+          ) : (
+            visible.map((item) => (
+              <button
+                key={item.company}
+                type="button"
+                role="option"
+                className="applied-company-option"
+                onClick={() => {
+                  onChange(item.company)
+                  setOpen(false)
+                }}
+              >
+                {item.company}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function Applied({
   preset,
   onOpenCompany,
@@ -299,10 +383,11 @@ export function Applied({
   const [dir, setDir] = usePersistentState<"asc" | "desc">("applied.dir", "desc", oneOf("asc", "desc"))
   const [company, setCompany] = usePersistentState("applied.company", "", text)
   const [companies, setCompanies] = useState<{ company: string; jobs: number }[]>([])
+  // The request uses the debounced name, so typing does not blank the table.
+  const companyQueryRef = useRef(company.trim())
+  const [companyTick, setCompanyTick] = useState(0)
   const [listedCompany, setListedCompany] = useState(company.trim())
   const request = useRef(0)
-  const companyRef = useRef(company)
-  companyRef.current = company
 
   const rows = useMemo(() => {
     if (!jobs || !sort) return jobs
@@ -327,7 +412,7 @@ export function Applied({
       if (!silent) setJobs(null)
       const token = ++request.current
       const interviewedFilter = status === "rejected" && interviewed ? interviewed : undefined
-      const name = company.trim()
+      const name = companyQueryRef.current
       const result = await run(() => api.applied(status || undefined, interviewedFilter, name || undefined))
       if (token !== request.current) return
       if (result) {
@@ -335,20 +420,27 @@ export function Applied({
         setJobs(result.jobs)
       }
     },
-    [run, status, interviewed, company],
+    [run, status, interviewed],
   )
 
   const loadCompanies = useCallback(async () => {
     const interviewedFilter = status === "rejected" && interviewed ? interviewed : undefined
     const result = await run(() => api.appliedCompanies(status || undefined, interviewedFilter))
-    if (!result) return
-    setCompanies(result.companies)
-    const picked = companyRef.current.trim()
-    if (picked && !result.companies.some((item) => item.company === picked)) setCompany("")
-  }, [run, status, interviewed, setCompany])
+    if (result) setCompanies(result.companies)
+  }, [run, status, interviewed])
 
-  useLoader(load)
+  useLoader(load, companyTick)
   useLoader(loadCompanies)
+
+  useEffect(() => {
+    const next = company.trim()
+    if (next === companyQueryRef.current) return
+    const handle = window.setTimeout(() => {
+      companyQueryRef.current = next
+      setCompanyTick((tick) => tick + 1)
+    }, 200)
+    return () => window.clearTimeout(handle)
+  }, [company])
 
   async function openCard(job: Job) {
     setOpen(job)
@@ -454,19 +546,7 @@ export function Applied({
         <button className="btn btn-primary btn-sm" onClick={() => setComposing(true)}>
           {t("Add a job")}
         </button>
-        <select
-          className="select select-inline applied-company"
-          aria-label={t("Company")}
-          value={companies.some((item) => item.company === company) ? company : ""}
-          onChange={(event) => setCompany(event.target.value)}
-        >
-          <option value="">{t("All companies")}</option>
-          {companies.map((item) => (
-            <option key={item.company} value={item.company}>
-              {item.company}
-            </option>
-          ))}
-        </select>
+        <CompanyMenu value={company} companies={companies} onChange={setCompany} />
       </div>
 
       {rows?.length ? (

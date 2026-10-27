@@ -1036,8 +1036,51 @@ a:hover {
 }
 
 .applied-company {
+  position: relative;
   margin-left: auto;
-  max-width: 280px;
+  width: 220px;
+  flex: 0 0 220px;
+}
+
+.applied-company .input {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.applied-company-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max(100%, 260px);
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-input);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+}
+
+.applied-company-option {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.applied-company-option:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .input.input-inline {
