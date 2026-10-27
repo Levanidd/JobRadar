@@ -331,6 +331,37 @@ describe("upsertJobs", () => {
     expect(stored[1]?.duplicate_of).toBeTruthy()
   })
 
+  it("promotes a located copy over an empty primary", async () => {
+    const board = await addSource({ label: "Hospitable", provider: "workable", token: "hospitable-blank" })
+    await upsertJobs(
+      env,
+      board,
+      [job({ company: "Hospitable", title: "Senior Product Manager, Core", location: "", url: "https://apply.workable.com/hospitable/j/blank" })],
+      new Set(),
+    )
+    const aggregator = await addSource({ label: "Startup Jobs", provider: "startup-jobs", token: "startup-blank" })
+    await upsertJobs(
+      env,
+      aggregator,
+      [
+        job({
+          company: "Hospitable.com",
+          externalId: "2",
+          title: "Senior Product Manager, Core (USA/Europe - Remote)",
+          location: "Remote, Portugal",
+          url: "https://startup.jobs/hospitable-located",
+        }),
+      ],
+      new Set(),
+    )
+    const primary = await one<{ location: string | null; duplicate_of: string | null }>(
+      env,
+      `SELECT location, duplicate_of FROM jobs WHERE duplicate_of IS NULL`,
+    )
+    expect(primary?.duplicate_of).toBeNull()
+    expect(primary?.location).toBe("Remote, Portugal")
+  })
+
   it("does not group Impact with impact.com when the role differs", async () => {
     const source = await addSource()
     await upsertJobs(
