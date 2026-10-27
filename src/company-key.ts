@@ -1,3 +1,5 @@
+import { isPlaceOnly, locationKey } from "./places"
+
 const SUFFIX = /\b(gmbh|se|ag|ltd|inc|b\.v\.|bv|llc|plc|kg|ohg|ug)\b/gi
 
 export function companyKey(name: string): string {
@@ -35,7 +37,8 @@ export function titleKey(title: string): string {
   return title
     .toLowerCase()
     .replace(GENDER_TAG, " ")
-    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(all genders|any gender)\b/g, " ")
+    .replace(/\(([^)]*)\)/g, (_, inner: string) => (isPlaceOnly(inner) ? " " : ` ${inner} `))
     .replace(PLACE_TAIL, " ")
     .replace(/\bsr\.?\b/g, "senior")
     .replace(/\bjr\.?\b/g, "junior")
@@ -45,16 +48,25 @@ export function titleKey(title: string): string {
     .trim()
 }
 
-/**
- * Identifies one opening across the boards that carry it. A role reaches us
- * from the employer's own board and from every aggregator that scraped it, and
- * those copies share nothing reliable — not the URL, not the id — except who
- * is hiring and for what.
- */
-export function dedupKey(company: string, title: string): string {
-  const role = titleKey(title)
+/** Company and role, without the place. Used to find candidate twins. */
+export function roleKey(company: string, title: string): string {
   const who = companyKey(company)
+  const role = titleKey(title)
   return who && role ? `${who}|${role}` : ""
+}
+
+export { locationKey, parsePlaces, placeCount, placesMatch, type PlaceSet } from "./places"
+
+/**
+ * Identifies one opening across the boards that carry it. The same role in
+ * another city is a different opening. A missing location only matches
+ * another missing location.
+ */
+export function dedupKey(company: string, title: string, location?: string | null): string {
+  const role = roleKey(company, title)
+  if (!role) return ""
+  const place = locationKey(location)
+  return place ? `${role}|${place}` : role
 }
 
 export async function jobHash(provider: string, token: string, externalId: string): Promise<string> {

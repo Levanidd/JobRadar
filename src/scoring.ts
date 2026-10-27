@@ -140,7 +140,7 @@ export function localScore(job: ScoreInput): ScoreOutput {
   let score = 52
   const reasons: string[] = []
 
-  if (/intern|working student|werkstudent|praktikum|junior|\bjr\.?\b/.test(blob)) {
+  if (/\bintern(ship)?\b|working student|werkstudent|praktikum|\bjunior\b|\bjr\.?\b/.test(blob)) {
     flags.push("not_senior")
     return { external_id: job.external_id, score: 0, reason: "Junior/intern level", flags }
   }

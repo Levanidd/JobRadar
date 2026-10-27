@@ -81,8 +81,8 @@ export function parseEnvPayload(text) {
  *   - title:    `name`
  *   - url:      /en/companies/{organization.slug}/jobs/{slug} on the WTTJ site
  *   - company:  `organization.name`
- *   - location: offices[0] city+country, with ", Remote" appended when the
- *               posting allows fulltime remote
+ *   - location: every office as "City, Country", joined with "; ", and
+ *               "Remote" appended when the posting allows fulltime remote
  *   - postedAt: `published_at_timestamp` (epoch seconds → ms)
  *   - salary:   {min, max, currency} from salary_yearly_minimum/salary_maximum
  *
@@ -104,12 +104,16 @@ export function normalizeWttjHit(h) {
       ? h.organization.name.trim()
       : 'Welcome to the Jungle';
 
-  const office = Array.isArray(h.offices) && h.offices.length > 0 ? h.offices[0] : null;
-  const parts = [];
-  if (office && typeof office.city === 'string' && office.city.trim()) parts.push(office.city.trim());
-  if (office && typeof office.country === 'string' && office.country.trim()) parts.push(office.country.trim());
-  if (h.remote === 'fulltime') parts.push('Remote');
-  const location = parts.join(', ');
+  const offices = Array.isArray(h.offices) ? h.offices : [];
+  const places = [];
+  for (const office of offices) {
+    const parts = [];
+    if (office && typeof office.city === 'string' && office.city.trim()) parts.push(office.city.trim());
+    if (office && typeof office.country === 'string' && office.country.trim()) parts.push(office.country.trim());
+    if (parts.length > 0) places.push(parts.join(', '));
+  }
+  if (h.remote === 'fulltime') places.push('Remote');
+  const location = places.join('; ');
 
   /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number, max: number, currency: string} }} */
   const job = { title, url, company, location };

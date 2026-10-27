@@ -1,6 +1,9 @@
 import { getAdapter } from "./adapters"
 import { bodyComesLater, fetchLateBody } from "./adapters/details"
-import { companyKey, companiesRelated, dedupKey, jobHash, titleKey } from "./company-key"
+import { fetchWorkdayLocations, WORKDAY_PLACEHOLDER } from "./adapters/workday"
+import { boardRank } from "./boards"
+import { companyKey, companiesRelated, dedupKey, jobHash, roleKey, titleKey } from "./company-key"
+import { parsePlaces, placeCount, placesMatch } from "./places"
 import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
 import { pick } from "./locale"
@@ -84,8 +87,14 @@ async function loadRelatedTwins(env: Bindings, keys: string[], kind: "query" | "
       ...part.map(() => `(j.company_key >= ? AND j.company_key < ?)`),
     ].join(" OR ")
     const res = await env.DB.prepare(
-      `SELECT j.id, j.company_key, j.title, s.kind, j.first_seen_at, j.closed_at, j.duplicate_of
+      `SELECT j.id, j.role_key, j.dedup_key, j.company_key, j.title, j.location, s.kind, s.provider, j.first_seen_at, j.closed_at, j.duplicate_of,
+              COALESCE(p.id, j.id) AS primary_id, COALESCE(p.location, j.location) AS primary_location,
+              COALESCE(sp.kind, s.kind) AS primary_kind,
+              COALESCE(sp.provider, s.provider) AS primary_provider,
+              COALESCE(p.closed_at, j.closed_at) AS primary_closed_at
        FROM jobs j JOIN sources s ON s.id = j.source_id
+       LEFT JOIN jobs p ON p.id = j.duplicate_of
+       LEFT JOIN sources sp ON sp.id = p.source_id
        WHERE s.kind = ? AND (${clause})
        ORDER BY j.closed_at IS NULL DESC, j.closed_at DESC`,
     )
@@ -111,6 +120,107 @@ export function boardKeepsYoungMisses(provider: string): boolean {
   return getAdapter(provider).kind === "query"
 }
 
+type OpenChild = {
+  id: string
+  duplicate_of: string
+  location: string | null
+  first_seen_at: string
+  provider: string
+}
+
+function compareListings(
+  a: OpenChild,
+  b: OpenChild,
+  guarded: Set<string>,
+): number {
+  const guard = Number(guarded.has(b.id)) - Number(guarded.has(a.id))
+  if (guard !== 0) return guard
+  const rank = boardRank(b.provider) - boardRank(a.provider)
+  if (rank !== 0) return rank
+  const places = placeCount(b.location) - placeCount(a.location)
+  if (places !== 0) return places
+  return a.first_seen_at < b.first_seen_at ? -1 : a.first_seen_at > b.first_seen_at ? 1 : 0
+}
+
+/**
+ * An open copy pointing at a closed primary is invisible. One open copy becomes
+ * the primary; the rest follow it. A copy someone has acted on is never demoted.
+ */
+export async function releaseClosedPrimaries(env: Bindings, sourceId: number | null = null): Promise<string[]> {
+  const promoted: string[] = []
+  for (;;) {
+    const parents = await env.DB.prepare(
+      `SELECT p.id, p.first_seen_at FROM jobs p
+       WHERE p.closed_at IS NOT NULL AND p.duplicate_of IS NULL
+         AND (? IS NULL OR p.source_id = ?)
+         AND EXISTS (SELECT 1 FROM jobs c WHERE c.duplicate_of = p.id AND c.closed_at IS NULL)
+       LIMIT 40`,
+    )
+      .bind(sourceId, sourceId)
+      .all<{ id: string; first_seen_at: string }>()
+    if (parents.results.length === 0) break
+    const parentIds = parents.results.map((row) => row.id)
+    const parentSeen = new Map(parents.results.map((row) => [row.id, row.first_seen_at]))
+    const children = await env.DB.prepare(
+      `SELECT c.id, c.duplicate_of, c.location, c.first_seen_at, s.provider
+       FROM jobs c JOIN sources s ON s.id = c.source_id
+       WHERE c.closed_at IS NULL AND c.duplicate_of IN (${placeholders(parentIds.length)})`,
+    )
+      .bind(...parentIds)
+      .all<OpenChild>()
+    if (children.results.length === 0) break
+    const guarded = new Set(
+      (
+        await selectIn<{ job_id: string }>(
+          env,
+          (list) => `SELECT DISTINCT job_id FROM user_jobs
+             WHERE job_id IN (${list})
+               AND (applied_at IS NOT NULL OR interviewed_at IS NOT NULL
+                 OR TRIM(COALESCE(notes, '')) != ''
+                 OR TRIM(COALESCE(cv_url, '')) != ''
+                 OR TRIM(COALESCE(claude_comment, '')) != ''
+                 OR COALESCE(status, 'new') NOT IN ('new', 'off_profile'))`,
+          children.results.map((row) => row.id),
+        )
+      ).map((row) => row.job_id),
+    )
+    const byParent = new Map<string, OpenChild[]>()
+    for (const child of children.results) {
+      const list = byParent.get(child.duplicate_of) ?? []
+      list.push(child)
+      byParent.set(child.duplicate_of, list)
+    }
+    const writes: D1PreparedStatement[] = []
+    const raised: string[] = []
+    for (const [parent, group] of byParent) {
+      const protectedChildren = group.filter((row) => guarded.has(row.id))
+      const pool = protectedChildren.length > 1 ? protectedChildren : group
+      const heir = [...pool].sort((a, b) => compareListings(a, b, guarded))[0]!
+      const standAlone = protectedChildren.length > 1 ? protectedChildren : [heir]
+      for (const row of standAlone) {
+        writes.push(env.DB.prepare(`UPDATE jobs SET duplicate_of = NULL WHERE id = ?`).bind(row.id))
+        raised.push(row.id)
+      }
+      for (const row of group) {
+        if (standAlone.some((item) => item.id === row.id)) continue
+        writes.push(env.DB.prepare(`UPDATE jobs SET duplicate_of = ? WHERE id = ?`).bind(heir.id, row.id))
+      }
+      writes.push(inheritFirstSeen(env, parentSeen.get(parent) ?? heir.first_seen_at, heir.id))
+      writes.push(inheritUserJobs(env, parent, heir.id))
+      writes.push(env.DB.prepare(`UPDATE interview_stages SET job_id = ? WHERE job_id = ?`).bind(heir.id, parent))
+    }
+    writes.push(
+      env.DB.prepare(`INSERT OR IGNORE INTO dedup_released (job_id) SELECT value FROM json_each(?)`).bind(
+        JSON.stringify(raised),
+      ),
+    )
+    await runBatch(env, writes)
+    promoted.push(...raised)
+    if (parents.results.length < 40) break
+  }
+  return promoted
+}
+
 export async function markMissingClosed(env: Bindings, source: SourceRow, runStart: string): Promise<void> {
   const grace = boardKeepsYoungMisses(source.provider) ? 1 : 0
   await env.DB.prepare(
@@ -120,6 +230,8 @@ export async function markMissingClosed(env: Bindings, source: SourceRow, runSta
   )
     .bind(source.id, runStart, grace, MONTH)
     .run()
+  const promoted = await releaseClosedPrimaries(env, source.id)
+  if (promoted.length > 0) console.log(`promoted ${promoted.length} open copies from under a closed primary`)
 }
 
 /** D1 binds at most 100 values, and a hop has to finish inside the worker budget. */
@@ -243,12 +355,20 @@ export async function archiveStaleSearchBoardJobs(env: Bindings, source: SourceR
 
 type TwinRow = {
   id: string
+  role_key: string
   kind: string
   first_seen_at: string
   closed_at: string | null
   company_key: string
   title: string
+  location: string | null
   duplicate_of: string | null
+  dedup_key: string | null
+  primary_id: string
+  primary_location: string | null
+  primary_kind: string
+  primary_provider: string
+  primary_closed_at: string | null
 }
 
 export type SourceStep = RunResult & {
@@ -314,6 +434,38 @@ function clearBoardCache(): void {
  * every write goes out in batches: a statement per row used to cost a round trip,
  * and sixty rows of those is what pushed a cycle hop past the Worker's budget.
  */
+/** Replaces a Workday "3 Locations" stub once, and again only if the title changes. */
+async function fillWorkdayPlaces(
+  env: Bindings,
+  rows: Array<{ id: string; job: RawJob }>,
+): Promise<void> {
+  const stubs = rows.filter((row) => WORKDAY_PLACEHOLDER.test(row.job.location ?? ""))
+  if (stubs.length === 0) return
+  const known = new Map(
+    (
+      await selectIn<{ id: string; title: string; location: string | null }>(
+        env,
+        (list) => `SELECT id, title, location FROM jobs WHERE id IN (${list})`,
+        stubs.map((row) => row.id),
+      )
+    ).map((row) => [row.id, row]),
+  )
+  const todo = stubs.filter((row) => {
+    const saved = known.get(row.id)
+    if (!saved) return true
+    if (WORKDAY_PLACEHOLDER.test(saved.location ?? "")) return true
+    return saved.title !== row.job.title
+  })
+  for (const part of chunk(todo, 2)) {
+    await Promise.all(
+      part.map(async (row) => {
+        const places = await fetchWorkdayLocations(row.job.url)
+        if (places) row.job.location = places
+      }),
+    )
+  }
+}
+
 export async function upsertJobs(
   env: Bindings,
   source: SourceRow,
@@ -322,18 +474,23 @@ export async function upsertJobs(
 ): Promise<number> {
   if (jobs.length === 0) return 0
 
-  const wanted = await Promise.all(
+  const prepared = await Promise.all(
     jobs.map(async (job) => {
       const company = job.company ?? source.label
       return {
         job,
         company,
         key: companyKey(company),
-        opening: dedupKey(company, job.title) || null,
         id: await jobHash(source.provider, source.token, job.externalId),
       }
     }),
   )
+  if (source.provider === "workday") await fillWorkdayPlaces(env, prepared)
+  const wanted = prepared.map((row) => ({
+    ...row,
+    opening: dedupKey(row.company, row.job.title, row.job.location) || null,
+    role: roleKey(row.company, row.job.title) || null,
+  }))
 
   const present = new Set(
     (
@@ -344,21 +501,45 @@ export async function upsertJobs(
       )
     ).map((row) => row.id),
   )
-  const twins = new Map<string, TwinRow>()
-  const openings = [...new Set(wanted.filter((row) => !present.has(row.id) && row.opening).map((row) => row.opening!))]
+  const byRole = new Map<string, TwinRow[]>()
+  const roles = [...new Set(wanted.filter((row) => !present.has(row.id) && row.role).map((row) => row.role!))]
   // Closed rows are in scope on purpose: a board that takes an opening down and
   // puts it back gives it a new id, and the row we already have for it is closed
   // by then. A live twin still wins over a retired one.
-  for (const twin of await selectIn<TwinRow & { dedup_key: string }>(
+  for (const twin of await selectIn<TwinRow>(
     env,
-    (list) => `SELECT j.id, j.dedup_key, j.company_key, j.title, s.kind, j.first_seen_at, j.closed_at, j.duplicate_of
+    (list) => `SELECT j.id, j.role_key, j.dedup_key, j.company_key, j.title, j.location, s.kind, s.provider,
+         j.first_seen_at, j.closed_at, j.duplicate_of,
+         COALESCE(p.id, j.id) AS primary_id,
+         COALESCE(p.location, j.location) AS primary_location,
+         COALESCE(sp.kind, s.kind) AS primary_kind,
+         COALESCE(sp.provider, s.provider) AS primary_provider,
+         COALESCE(p.closed_at, j.closed_at) AS primary_closed_at
        FROM jobs j JOIN sources s ON s.id = j.source_id
-       WHERE j.dedup_key IN (${list})
-       ORDER BY j.closed_at IS NULL DESC, j.closed_at DESC`,
-    openings,
+       LEFT JOIN jobs p ON p.id = j.duplicate_of
+       LEFT JOIN sources sp ON sp.id = p.source_id
+       WHERE j.role_key IN (${list})`,
+    roles,
   )) {
-    if (!twins.has(twin.dedup_key)) twins.set(twin.dedup_key, twin)
+    const list = byRole.get(twin.role_key) ?? []
+    list.push(twin)
+    byRole.set(twin.role_key, list)
   }
+  const protectedIds = new Set(
+    (
+      await selectIn<{ job_id: string }>(
+        env,
+        (list) => `SELECT DISTINCT job_id FROM user_jobs
+           WHERE job_id IN (${list})
+             AND (applied_at IS NOT NULL OR interviewed_at IS NOT NULL
+               OR TRIM(COALESCE(notes, '')) != ''
+               OR TRIM(COALESCE(cv_url, '')) != ''
+               OR TRIM(COALESCE(claude_comment, '')) != ''
+               OR COALESCE(status, 'new') NOT IN ('new', 'off_profile'))`,
+        [...new Set([...byRole.values()].flatMap((list) => list.map((row) => row.primary_id)))],
+      )
+    ).map((row) => row.job_id),
+  )
 
   const usedTwins = new Set<string>()
   const relatedKeys = [
@@ -368,18 +549,27 @@ export async function upsertJobs(
   ]
   const relatedTwins = await loadRelatedTwins(env, relatedKeys, source.kind === "company" ? "query" : "company")
 
-  function findTwin(opening: string | null, key: string, title: string): TwinRow | null {
-    if (opening) {
-      const exact = twins.get(opening)
-      if (exact && !usedTwins.has(exact.id)) return exact
-    }
-    const role = titleKey(title)
-    if (!role) return null
-    return (
+  function matchesPlace(row: TwinRow, place: ReturnType<typeof parsePlaces>): boolean {
+    return placesMatch(place, parsePlaces(row.primary_location ?? row.location))
+  }
+
+  function findTwin(role: string | null, key: string, opening: string | null, title: string, location: string | undefined): TwinRow | null {
+    const words = titleKey(title)
+    if (!words) return null
+    const place = parsePlaces(location)
+    const sameRole = (role && byRole.get(role)) || []
+    const exact = opening ? sameRole.find((row) => row.dedup_key === opening && !usedTwins.has(row.id)) : undefined
+    const found =
+      exact ??
+      sameRole.find((row) => !usedTwins.has(row.id) && matchesPlace(row, place)) ??
       relatedTwins.find(
-        (row) => !usedTwins.has(row.id) && titleKey(row.title) === role && companiesRelated(key, row.company_key),
-      ) ?? null
-    )
+        (row) =>
+          !usedTwins.has(row.id) &&
+          titleKey(row.title) === words &&
+          companiesRelated(key, row.company_key) &&
+          ((opening !== null && row.dedup_key === opening) || matchesPlace(row, place)),
+      )
+    return found ?? null
   }
 
   const storedHash = new Map<string, string | null>()
@@ -403,25 +593,31 @@ export async function upsertJobs(
   let jobsNew = 0
   let textsWritten = 0
 
-  for (const { job, company, key, opening, id } of wanted) {
+  for (const { job, company, key, opening, role, id } of wanted) {
     const existing = present.has(id)
-    // Two copies of one opening on the same board: the first one wins, exactly
-    // as it did when each row looked itself up against the rows written before it.
+    // Two copies of one opening — same company, role and place — on the same
+    // board: the first one wins. A second city is a different opening.
     if (opening && !existing && claimed.has(opening)) continue
 
     let inherit: TwinRow | null = null
     let duplicateOf: string | null = null
+    let promote: TwinRow | null = null
     if (!existing) {
-      const twin = findTwin(opening, key, job.title)
+      const twin = findTwin(role, key, opening, job.title, job.location)
       if (twin) {
-        usedTwins.add(twin.id)
-        if (opening) twins.delete(opening)
-        // A retired twin is the same opening re-posted under a new id: it has
-        // to hand over its history, otherwise whoever already applied sees a
-        // brand-new vacancy. A live twin stays — both listings are kept, and
-        // the one already in the list remains the primary until a person picks.
-        if (twin.closed_at) inherit = twin
-        else duplicateOf = twin.duplicate_of || twin.id
+        const guarded = protectedIds.has(twin.primary_id)
+        const incomingCount = placeCount(job.location)
+        const currentCount = placeCount(twin.primary_location)
+        const incomingRank = boardRank(source.provider)
+        const currentRank = boardRank(twin.primary_provider)
+        const fuller = incomingCount > currentCount && incomingRank === currentRank
+        const strongerBoard = incomingRank > currentRank
+        if (twin.closed_at && !twin.duplicate_of) {
+          inherit = twin
+          usedTwins.add(twin.id)
+        } else if (twin.primary_closed_at) promote = twin
+        else if (!guarded && (fuller || strongerBoard)) promote = twin
+        else duplicateOf = twin.primary_id
       }
       if (opening) claimed.add(opening)
     }
@@ -435,13 +631,14 @@ export async function upsertJobs(
     const textChanged = body !== undefined && body.hash !== (storedHash.get(id) ?? null)
     writes.push(
       env.DB.prepare(
-        `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, location, url, posted_at, salary_min, salary_max, salary_currency, dedup_key, text_hash, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
+        `INSERT INTO jobs (id, source_id, external_id, company, company_key, title, location, url, posted_at, salary_min, salary_max, salary_currency, dedup_key, role_key, text_hash, first_seen_at, last_seen_at, changed_at, closed_at, status, duplicate_of)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), NULL, 'new', ?)
          ON CONFLICT(id) DO UPDATE SET
            last_seen_at = datetime('now'),
            title = excluded.title,
            location = excluded.location,
            dedup_key = excluded.dedup_key,
+           role_key = excluded.role_key,
            closed_at = NULL,
            posted_at = COALESCE(excluded.posted_at, jobs.posted_at),
            salary_min = COALESCE(excluded.salary_min, jobs.salary_min),
@@ -472,6 +669,7 @@ export async function upsertJobs(
         job.salary?.max ?? null,
         job.salary?.currency || null,
         opening,
+        role,
         body?.hash ?? null,
         duplicateOf,
         textChanged ? 1 : 0,
@@ -481,6 +679,20 @@ export async function upsertJobs(
     if (textChanged && description) {
       writes.push(saveJobText(env, id, description))
       textsWritten += 1
+    }
+
+    if (promote) {
+      writes.push(inheritFirstSeen(env, promote.first_seen_at, id))
+      writes.push(inheritUserJobs(env, promote.primary_id, id))
+      writes.push(env.DB.prepare(`UPDATE interview_stages SET job_id = ? WHERE job_id = ?`).bind(id, promote.primary_id))
+      writes.push(
+        env.DB.prepare(`UPDATE jobs SET duplicate_of = ? WHERE (id = ? OR duplicate_of = ?) AND id != ?`).bind(
+          id,
+          promote.primary_id,
+          promote.primary_id,
+          id,
+        ),
+      )
     }
 
     if (inherit) {
@@ -842,7 +1054,7 @@ export async function prefilterAndScore(
   userId: number,
   limit?: number,
   usage: UsageContext = { kind: "score", userId, trigger: "manual" },
-  options: { includeOld?: boolean } = {},
+  options: { includeOld?: boolean; onlyIds?: string[] } = {},
 ): Promise<ScorePass> {
   const blocked = await excludeBlockedCompaniesForUser(env, userId, "j.company_key")
   const windowDays = await scoreWindowDays(env, userId)
@@ -858,11 +1070,20 @@ export async function prefilterAndScore(
        AND (uj.scoring_claimed_at IS NULL OR uj.scoring_claimed_at < datetime('now', ?))
        AND COALESCE(uj.scoring_attempts, 0) < 3
        AND (? = 1 OR j.first_seen_at >= datetime('now', ?))
+       AND (${options.onlyIds ? "j.id IN (SELECT value FROM json_each(?))" : "1=1"})
        AND ${blocked.sql}
      ORDER BY j.first_seen_at
      LIMIT ?`,
   )
-    .bind(userId, CLAIM_TTL, options.includeOld ? 1 : 0, `-${windowDays} days`, ...blocked.binds, CANDIDATE_WINDOW)
+    .bind(
+      userId,
+      CLAIM_TTL,
+      options.includeOld || options.onlyIds ? 1 : 0,
+      `-${windowDays} days`,
+      ...(options.onlyIds ? [JSON.stringify(options.onlyIds)] : []),
+      ...blocked.binds,
+      CANDIDATE_WINDOW,
+    )
     .all<Candidate>()
 
   const rules = await resolveUserPrefilter(env, userId)
@@ -1358,7 +1579,8 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
   const sourceId = await ensureManualSource(env)
   const id = await jobHash("manual", "manual", url)
   const key = companyKey(company)
-  const opening = dedupKey(company, title) || null
+  const opening = dedupKey(company, title, input.location) || null
+  const role = roleKey(company, title) || null
   const description = clipDescription(input.description) ?? null
   const hash = description ? await textHash(description) : null
   const notes = input.notes?.trim() || null
@@ -1372,11 +1594,11 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
   await env.DB.prepare(
     `INSERT INTO jobs (
        id, source_id, external_id, company, company_key, title, location, url,
-       posted_at, salary_min, salary_max, salary_currency, dedup_key, text_hash,
+       posted_at, salary_min, salary_max, salary_currency, dedup_key, role_key, text_hash,
        first_seen_at, last_seen_at, changed_at, closed_at, status
      ) VALUES (
        ?, ?, ?, ?, ?, ?, ?, ?,
-       NULL, ?, ?, ?, ?, ?,
+       NULL, ?, ?, ?, ?, ?, ?,
        datetime('now'), datetime('now'), datetime('now'), NULL, 'new'
      )
      ON CONFLICT(id) DO UPDATE SET
@@ -1388,6 +1610,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
        salary_max = COALESCE(excluded.salary_max, jobs.salary_max),
        salary_currency = COALESCE(excluded.salary_currency, jobs.salary_currency),
        dedup_key = excluded.dedup_key,
+       role_key = excluded.role_key,
        text_hash = COALESCE(excluded.text_hash, jobs.text_hash),
        closed_at = NULL,
        last_seen_at = datetime('now'),
@@ -1406,6 +1629,7 @@ export async function createManualJob(env: Bindings, input: ManualJobInput, user
       salary?.max ?? null,
       salary?.currency || null,
       opening,
+      role,
       hash,
     )
     .run()
