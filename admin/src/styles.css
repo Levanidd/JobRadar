@@ -1057,8 +1057,6 @@ a:hover {
   right: 0;
   max-height: 280px;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
   padding: 6px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
@@ -1069,13 +1067,15 @@ a:hover {
 .applied-company-option {
   display: block;
   width: 100%;
+  min-height: 32px;
   padding: 7px 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: inherit;
+  color: var(--text-primary);
   text-align: left;
   font: inherit;
+  line-height: 1.35;
   cursor: pointer;
   overflow: hidden;
   white-space: nowrap;
