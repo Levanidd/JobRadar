@@ -4,7 +4,7 @@ import { fetchWorkdayLocations, WORKDAY_PLACEHOLDER } from "./adapters/workday"
 import { boardRank } from "./boards"
 import { companyKey, companyMatchKey, companiesRelated, dedupKey, domainsConflict, employerDomain, jobHash, roleKey, titleKey } from "./company-key"
 import { actionRank, blankPlaceKey } from "./dedup-group"
-import { readRepost, recentExactRepost, repostReason, titleMatch, writeFlags } from "./repost"
+import { flagTags, readRepost, recentExactRepost, repostReason, repostStaysVisible, shouldParkRepost, titleMatch, writeFlags } from "./repost"
 import { isUnlocated, locationKey, parsePlaces, placeCount, placesMatch } from "./places"
 import { chunk, placeholders, runBatch, selectIn } from "./db"
 import { message } from "./errors"
@@ -672,7 +672,7 @@ export async function upsertJobs(
   }
 
   const writes: D1PreparedStatement[] = []
-  const freshPrimaries: Array<{ id: string; company: string; title: string; url: string }> = []
+  const freshPrimaries: Array<{ id: string; company: string; title: string; url: string; location: string | null }> = []
   /** Openings already claimed by an earlier row of this same slice. */
   const claimed = new Set<string>()
   let jobsNew = 0
@@ -698,15 +698,17 @@ export async function upsertJobs(
         const fuller = incomingCount > currentCount && incomingRank === currentRank
         const strongerBoard = incomingRank > currentRank
         const keptForStatus = (statusRank.get(twin.primary_id) ?? 0) > 0
+        // A view does not keep an empty listing ahead of a copy that names a place.
+        const locatedOverBlank = incomingCount > 0 && currentCount === 0 && (statusRank.get(twin.primary_id) ?? 0) < 35
         if (twin.closed_at && !twin.duplicate_of) {
           inherit = twin
           usedTwins.add(twin.id)
         } else if (twin.primary_closed_at) promote = twin
-        else if (!keptForStatus && (fuller || strongerBoard)) promote = twin
+        else if (locatedOverBlank || (!keptForStatus && (fuller || strongerBoard))) promote = twin
         else duplicateOf = twin.primary_id
       }
       replacedPrimary = promote?.primary_id ?? null
-      if (!duplicateOf) freshPrimaries.push({ id, company, title: job.title, url: job.url })
+      if (!duplicateOf) freshPrimaries.push({ id, company, title: job.title, url: job.url, location: job.location ?? null })
       if (opening) claimed.add(opening)
       if (!duplicateOf && role) {
         const list = byRole.get(role) ?? []
@@ -853,6 +855,7 @@ export async function upsertJobs(
 type PreviousApplication = {
   id: string
   title: string
+  location: string | null
   status: string
   applied_at: string | null
   interviewed_at: string | null
@@ -874,7 +877,7 @@ const legacyJobByUrl = new Map<string, string | null>()
 /** The imported Agilefluent list has no user column. It belongs to the master account. */
 async function previousApplications(env: Bindings, userId: number, matchKey: string): Promise<PreviousApplication[]> {
   const rows = await env.DB.prepare(
-    `SELECT j.id, j.title, uj.status, uj.applied_at, uj.interviewed_at
+    `SELECT j.id, j.title, j.location, uj.status, uj.applied_at, uj.interviewed_at
      FROM jobs j
      JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = ?
      WHERE j.company_match_key = ?
@@ -919,7 +922,7 @@ async function previousApplications(env: Bindings, userId: number, matchKey: str
       legacyJobByUrl.set(row.url, id)
     }
     if (!id) continue
-    found.push({ id, title: row.title, status: row.status, applied_at: row.applied_at, interviewed_at: null })
+    found.push({ id, title: row.title, location: null, status: row.status, applied_at: row.applied_at, interviewed_at: null })
   }
   return found
 }
@@ -927,7 +930,7 @@ async function previousApplications(env: Bindings, userId: number, matchKey: str
 /** Marks a new primary when this person already applied to the same role here. Not a duplicate. */
 async function markReposts(
   env: Bindings,
-  jobs: Array<{ id: string; company: string; title: string; url: string }>,
+  jobs: Array<{ id: string; company: string; title: string; url: string; location: string | null }>,
   _careersUrl: string | null,
 ): Promise<void> {
   const fresh = jobs.filter((job) => companyMatchKey(job.company).length >= 3)
@@ -955,7 +958,7 @@ async function markReposts(
       const date = hit.item.applied_at ?? hit.item.interviewed_at ?? ""
       if (!date) continue
       const flags = writeFlags(null, { repost_of: hit.item.id, prev_status: status, prev_date: date, match: hit.kind })
-      const block = hit.kind === "exact" && recentExactRepost(flags)
+      const block = shouldParkRepost(flags, job.location, hit.item.location)
       writes.push(
         env.DB.prepare(
           `INSERT INTO user_jobs (user_id, job_id, status, score_reason, flags)
@@ -965,18 +968,20 @@ async function markReposts(
              status = CASE
                WHEN user_jobs.applied_at IS NOT NULL OR user_jobs.status IN ('applied', 'interview', 'rejected', 'saved')
                  THEN user_jobs.status
-               WHEN ? = 1 AND user_jobs.score IS NULL THEN 'off_profile'
+               WHEN ? = 1 THEN 'off_profile'
                ELSE user_jobs.status
              END,
              score_reason = CASE
-               WHEN ? = 1 AND user_jobs.score IS NULL THEN excluded.score_reason
+               WHEN ? = 1 AND user_jobs.applied_at IS NULL
+                 AND user_jobs.status NOT IN ('applied', 'interview', 'rejected', 'saved')
+                 THEN excluded.score_reason
                ELSE user_jobs.score_reason
              END`,
         ).bind(
           user.id,
           job.id,
           block ? "off_profile" : "new",
-          block ? repostReason(date) : null,
+          block ? repostReason(status, date) : null,
           flags,
           block ? 1 : 0,
           block ? 1 : 0,
@@ -1355,8 +1360,11 @@ export async function prefilterAndScore(
   const repostIds: string[] = []
   for (const job of open.results) {
     if (recentExactRepost(job.flags)) {
-      repostIds.push(job.id)
-      continue
+      const repost = readRepost(job.flags)
+      if (!repost || !repostStaysVisible(repost, flagTags(job.flags), job.location)) {
+        repostIds.push(job.id)
+        continue
+      }
     }
     if (passesPrefilter(job.title, rules)) candidates.push(job)
     else dropIds.push(job.id)

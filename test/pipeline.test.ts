@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { careerDomain, companyKey, companyMatchKey, companiesRelated, dedupKey, domainsConflict, employerDomain, locationKey, titleKey } from "../src/company-key"
-import { recentExactRepost, titleMatch, writeFlags } from "../src/repost"
+import { recentExactRepost, repostReason, repostStaysVisible, titleMatch, writeFlags } from "../src/repost"
 import { appliedConflict, blankPlaceKey, choosePrimary, mergeVerdicts, type Verdict } from "../src/dedup-group"
 import { parsePlaces, placesMatch } from "../src/places"
 import { isSuspicious } from "../src/ingest"
@@ -112,10 +112,24 @@ describe("company match key", () => {
 })
 
 describe("repost flag", () => {
-  it("calls the same role exact and a seniority change similar", () => {
+  it("calls the same role exact and ignores a seniority-only pair", () => {
     expect(titleMatch("Senior Product Owner (m/f/d)", "Senior Product Owner")).toBe("exact")
-    expect(titleMatch("Senior Product Owner", "Product Owner")).toBe("similar")
+    expect(titleMatch("Lead Product Manager", "Product Manager")).toBeNull()
+    expect(titleMatch("Senior Product Owner", "Product Owner")).toBeNull()
+    expect(titleMatch("Staff Product Manager - Internal AI", "Senior Product Manager - Internal AI")).toBe("similar")
     expect(titleMatch("Senior Product Owner", "Account Executive")).toBeNull()
+  })
+
+  it("keeps today's relocation in another city visible", () => {
+    const flag = {
+      repost_of: "berlin",
+      prev_status: "applied" as const,
+      prev_date: "2026-10-27 14:22:36",
+      match: "exact" as const,
+    }
+    expect(repostStaysVisible(flag, ["relocation_only"], "London, UK", "Berlin, Germany", new Date("2026-10-27T16:00:00Z"))).toBe(true)
+    expect(repostStaysVisible(flag, ["relocation_only"], "London, UK", "Berlin, Germany", new Date("2026-10-26T16:00:00Z"))).toBe(false)
+    expect(repostReason("rejected", "2026-09-21 14:26:28")).toBe("репост: rejected 2026-09-21")
   })
 
   it("skips scoring only for an exact repost from the last 60 days", () => {

@@ -1,4 +1,4 @@
-import { titleKey } from "./company-key"
+import { locationKey, titleKey } from "./company-key"
 
 const SENIORITY = new Set(["senior", "staff", "lead", "principal", "junior"])
 const DAY = 24 * 60 * 60 * 1000
@@ -28,10 +28,17 @@ export function jaccard(left: Set<string>, right: Set<string>): number {
   return union === 0 ? 0 : shared / union
 }
 
-/** Exact titleKey, or the same role words with seniority ignored. */
+/**
+ * Exact titleKey, or the same role words with seniority ignored.
+ * Two leftover words ("Lead Product Manager" and "Product Manager") are not
+ * enough to call the titles similar.
+ */
 export function titleMatch(a: string, b: string): RepostMatch | null {
   if (titleKey(a) && titleKey(a) === titleKey(b)) return "exact"
-  if (jaccard(titleTokens(a), titleTokens(b)) >= 0.8) return "similar"
+  const left = titleTokens(a)
+  const right = titleTokens(b)
+  if (left.size < 3 || right.size < 3) return null
+  if (jaccard(left, right) >= 0.8) return "similar"
   return null
 }
 
@@ -78,6 +85,51 @@ export function recentExactRepost(raw: string | null | undefined, now = Date.now
   return Number.isFinite(then) && now - then < 60 * DAY && now - then >= 0
 }
 
-export function repostReason(date: string): string {
-  return `репост: уже подавался ${date.slice(0, 10)}`
+export function berlinDay(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now)
+}
+
+/**
+ * An application made today, in another place, tagged relocation-only.
+ * The flag is enough: Navan London and New York stay in the list.
+ */
+export function repostStaysVisible(
+  repost: RepostFlag,
+  tags: string[],
+  location: string | null | undefined,
+  previousLocation?: string | null,
+  now = new Date(),
+): boolean {
+  if (repost.match !== "exact" || repost.prev_status !== "applied") return false
+  if (!tags.includes("relocation_only")) return false
+  if (repost.prev_date.slice(0, 10) !== berlinDay(now)) return false
+  const here = locationKey(location)
+  if (previousLocation === undefined) return here !== ""
+  return here !== locationKey(previousLocation)
+}
+
+export function shouldParkRepost(
+  raw: string | null | undefined,
+  location: string | null | undefined,
+  previousLocation?: string | null,
+  now = new Date(),
+): boolean {
+  if (!recentExactRepost(raw, now.getTime())) return false
+  const repost = readRepost(raw)
+  if (!repost) return false
+  return !repostStaysVisible(repost, flagTags(raw), location, previousLocation, now)
+}
+
+export function repostReason(status: string, date: string): string {
+  return `репост: ${status} ${date.slice(0, 10)}`
+}
+
+/** Drops the repost object and leaves the scoring tags. */
+export function clearRepost(raw: string | null | undefined): string {
+  return JSON.stringify(flagTags(raw))
 }
