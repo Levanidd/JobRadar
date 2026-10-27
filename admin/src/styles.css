@@ -1038,8 +1038,8 @@ a:hover {
 .applied-company {
   position: relative;
   margin-left: auto;
-  width: 220px;
-  flex: 0 0 220px;
+  width: 280px;
+  flex: 0 0 280px;
 }
 
 .applied-company .input {
@@ -1053,8 +1053,8 @@ a:hover {
   position: absolute;
   z-index: 40;
   top: calc(100% + 6px);
+  left: 0;
   right: 0;
-  width: max(100%, 260px);
   max-height: 280px;
   overflow-y: auto;
   display: flex;
@@ -1077,6 +1077,9 @@ a:hover {
   text-align: left;
   font: inherit;
   cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .applied-company-option:hover {
