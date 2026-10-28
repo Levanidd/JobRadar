@@ -376,6 +376,14 @@ export function SourcesPane({ onCount, onScreen }: PaneProps) {
           }
         >
           <table className="res-table res-table-sources">
+            <colgroup>
+              <col className="res-col-name" />
+              <col className="res-col-type" />
+              <col className="res-col-jobs" />
+              <col className="res-col-run" />
+              <col className="res-col-on" />
+              <col className="res-col-actions" />
+            </colgroup>
             <thead>
               <tr>
                 <SortTh column="label" label={t("Source")} sort={sort} dir={dir} onSort={sortBy} className="res-first" />

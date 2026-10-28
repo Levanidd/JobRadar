@@ -275,7 +275,26 @@
 }
 
 .res-table-sources {
-  min-width: 940px;
+  /* Fixed tracks. A long name or the sort arrow would otherwise become that
+     column's min-content and push Type and the rest off the card. */
+  table-layout: fixed;
+  min-width: 960px;
+}
+
+.res-col-name { width: 24%; }
+.res-col-type { width: 22%; }
+.res-col-jobs { width: 8%; }
+.res-col-run { width: 22%; }
+.res-col-on { width: 8%; }
+.res-col-actions { width: 16%; }
+
+.res-table-sources .res-name > .res-strong-link,
+.res-table-sources .res-name > .res-sub {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .res-table-discovery {
