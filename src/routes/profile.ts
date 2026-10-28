@@ -21,6 +21,7 @@ import {
 import type { AppEnv, Bindings } from "../types"
 import { withUsage } from "../usage"
 import { loadUserProfile, saveUserBlacklist, saveUserContent, saveUserPrefilter } from "../users"
+import { readBody, stringField } from "./body"
 
 export const profile = new Hono<AppEnv>()
 
@@ -166,10 +167,10 @@ profile.get("/api/models", async (c) => {
 profile.put("/api/settings", async (c) => {
   const denied = masterGuard(c)
   if (denied) return denied
-  const body = await c.req.json<{ provider?: string; model?: string; thinking_level?: string }>()
-  const provider = body.provider?.trim()
-  const model = body.model?.trim()
-  const thinking = body.thinking_level?.trim()
+  const body = await readBody(c)
+  const provider = stringField(body, "provider")
+  const model = stringField(body, "model")
+  const thinking = stringField(body, "thinking_level")
 
   if (provider && !isScoringProvider(provider)) return c.json({ error: "bad provider" }, 400)
   if (thinking && !isThinkingLevel(thinking)) return c.json({ error: "bad thinking_level" }, 400)
