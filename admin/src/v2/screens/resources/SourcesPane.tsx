@@ -50,7 +50,7 @@ function sortValue(source: Source, sort: SortKey): string | number {
 
 type BulkResult = { added: number; total: number; leftover: number }
 
-export function SourcesPane({ onCount, onScreen }: PaneProps) {
+export function SourcesPane({ onCount, onOpenJobs }: PaneProps) {
   const t = useT()
   const run = useAction()
   const { notify, sourcesTick, runningSourceId } = useApp()
@@ -417,7 +417,12 @@ export function SourcesPane({ onCount, onScreen }: PaneProps) {
                             }}
                           />
                         ) : (
-                          <JobsLink onScreen={onScreen} className="res-strong-link" title={t("Open Jobs")}>
+                          <JobsLink
+                            onOpenJobs={onOpenJobs}
+                            preset={{ kind: "source", id: source.id, label: source.label }}
+                            className="res-strong-link"
+                            title={t("Open Jobs")}
+                          >
                             {source.label}
                           </JobsLink>
                         )}

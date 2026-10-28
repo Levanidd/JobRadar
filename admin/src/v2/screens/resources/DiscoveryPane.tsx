@@ -43,7 +43,7 @@ function sortValue(company: DiscoveredCompany, sort: SortKey): string | number {
   }
 }
 
-export function DiscoveryPane({ onCount, onScreen }: PaneProps) {
+export function DiscoveryPane({ onCount, onOpenJobs }: PaneProps) {
   const t = useT()
   const run = useAction()
   const { notify } = useApp()
@@ -241,7 +241,12 @@ export function DiscoveryPane({ onCount, onScreen }: PaneProps) {
                 <tr key={company.company_key} className={busy === company.company_key ? "is-busy" : ""}>
                   <td className="res-first">
                     <div className="res-name">
-                      <JobsLink onScreen={onScreen} className="res-strong-link" title={t("Open Jobs")}>
+                      <JobsLink
+                        onOpenJobs={onOpenJobs}
+                        preset={{ kind: "company", key: company.company_key, name: company.company }}
+                        className="res-strong-link"
+                        title={t("Open Jobs")}
+                      >
                         {company.company}
                       </JobsLink>
                       {company.sample_url ? (

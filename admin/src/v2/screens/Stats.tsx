@@ -5,7 +5,7 @@ import { useAction, useLoader } from "../../app-context"
 import { getLang, useT } from "../../i18n"
 import { oneOf, usePersistentState } from "../../persist"
 import type { JobStats, StatsBucket } from "../../types"
-import type { Screen } from "../Sidebar"
+import type { AppliedPreset } from "../jobs-preset"
 import { Empty } from "../ui"
 import "../stats.css"
 
@@ -71,15 +71,15 @@ function monthTitle(start: string): string {
 }
 
 /** Lets a link open in a new tab with a modifier, and stays inside the app otherwise. */
-function follow(onScreen: (screen: Screen) => void, screen: Screen) {
+function follow(open: (preset: AppliedPreset) => void, preset: AppliedPreset) {
   return (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
-    onScreen(screen)
+    open(preset)
   }
 }
 
-function Funnel({ stats, period, onScreen }: { stats: JobStats; period: string; onScreen: (screen: Screen) => void }) {
+function Funnel({ stats, period, onOpenApplied }: { stats: JobStats; period: string; onOpenApplied: (preset: AppliedPreset) => void }) {
   const t = useT()
   const steps = [
     {
@@ -155,7 +155,7 @@ function Funnel({ stats, period, onScreen }: { stats: JobStats; period: string; 
               className="stats-step stats-step-link"
               href="#applied"
               title={t("Open: {label}", { label: step.label })}
-              onClick={follow(onScreen, "applied")}
+              onClick={follow(onOpenApplied, { tab: "" })}
             >
               {body}
             </a>
@@ -170,12 +170,12 @@ function Funnel({ stats, period, onScreen }: { stats: JobStats; period: string; 
   )
 }
 
-function Pipeline({ stats, onScreen }: { stats: JobStats; onScreen: (screen: Screen) => void }) {
+function Pipeline({ stats, onOpenApplied }: { stats: JobStats; onOpenApplied: (preset: AppliedPreset) => void }) {
   const t = useT()
   const answered = stats.pipeline.interview + stats.pipeline.rejected
   const weekTotal = stats.weeks.reduce((sum, row) => sum + row.total, 0)
-  const tiles = [
-    { key: "waiting", label: t("In progress"), value: stats.pipeline.waiting, tone: "amber", note: t("no interview or rejection yet") },
+  const tiles: Array<{ key: string; label: string; value: number; tone: string; note: string; preset: AppliedPreset }> = [
+    { key: "waiting", label: t("In progress"), value: stats.pipeline.waiting, tone: "amber", note: t("no interview or rejection yet"), preset: { tab: "applied" } },
     {
       key: "interview",
       label: t("Interviews"),
@@ -184,6 +184,7 @@ function Pipeline({ stats, onScreen }: { stats: JobStats; onScreen: (screen: Scr
       note: stats.applied
         ? t("{pct} of applications", { pct: pct(stats.pipeline.interview, stats.applied) })
         : t("shows up after you apply"),
+      preset: { tab: "interview" },
     },
     {
       key: "rejected",
@@ -193,6 +194,7 @@ function Pipeline({ stats, onScreen }: { stats: JobStats; onScreen: (screen: Scr
       note: stats.applied
         ? t("{pct} of applications · without an interview", { pct: pct(stats.pipeline.rejected, stats.applied) })
         : t("shows up after you apply"),
+      preset: { tab: "rejected", interviewed: "no" },
     },
   ]
   return (
@@ -216,7 +218,7 @@ function Pipeline({ stats, onScreen }: { stats: JobStats; onScreen: (screen: Scr
             className={`tile stats-tile stats-tile-${tile.tone}`}
             href="#applied"
             title={t("Open: {label}", { label: tile.label })}
-            onClick={follow(onScreen, "applied")}
+            onClick={follow(onOpenApplied, tile.preset)}
           >
             <span className="tile-label stats-tile-label">
               {tile.label}
@@ -312,7 +314,7 @@ function Chart({
   )
 }
 
-function Companies({ stats, onScreen }: { stats: JobStats; onScreen: (screen: Screen) => void }) {
+function Companies({ stats, onOpenApplied }: { stats: JobStats; onOpenApplied: (preset: AppliedPreset) => void }) {
   const t = useT()
   if (stats.companies.length === 0) return null
   const max = Math.max(1, ...stats.companies.map((item) => item.n))
@@ -327,7 +329,7 @@ function Companies({ stats, onScreen }: { stats: JobStats; onScreen: (screen: Sc
       <ul className="stats-companies">
         {stats.companies.map((item) => (
           <li key={item.company_key}>
-            <a href="#applied" className="stats-company" onClick={follow(onScreen, "applied")}>
+            <a href="#applied" className="stats-company" onClick={follow(onOpenApplied, { tab: "", company: item.company })}>
               <span className="stats-company-name" title={item.company}>
                 {item.company}
               </span>
@@ -360,7 +362,7 @@ function Loading() {
   )
 }
 
-export function Stats({ onScreen }: { onScreen: (screen: Screen) => void }) {
+export function Stats({ onOpenApplied }: { onOpenApplied: (preset: AppliedPreset) => void }) {
   const t = useT()
   const run = useAction()
   const [stats, setStats] = useState<JobStats | null>(null)
@@ -403,8 +405,8 @@ export function Stats({ onScreen }: { onScreen: (screen: Screen) => void }) {
         <Loading />
       ) : (
         <>
-          <Funnel stats={stats} period={span} onScreen={onScreen} />
-          <Pipeline stats={stats} onScreen={onScreen} />
+          <Funnel stats={stats} period={span} onOpenApplied={onOpenApplied} />
+          <Pipeline stats={stats} onOpenApplied={onOpenApplied} />
           <div className="stats-charts">
             <Chart
               title={t("Applications by week")}
@@ -421,7 +423,7 @@ export function Stats({ onScreen }: { onScreen: (screen: Screen) => void }) {
               full={(start, count) => `${monthTitle(start)}: ${count}`}
             />
           </div>
-          <Companies stats={stats} onScreen={onScreen} />
+          <Companies stats={stats} onOpenApplied={onOpenApplied} />
         </>
       )}
     </div>

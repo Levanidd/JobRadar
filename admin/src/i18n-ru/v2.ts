@@ -40,6 +40,7 @@ export const ru: Record<string, string> = {
   "All boards": "Все доски",
   "Including filtered out": "Включая отсеянные",
   "Clear the company filter": "Убрать фильтр по компании",
+  "Clear the source filter": "Убрать фильтр по источнику",
   "{count} in the list": "В списке: {count}",
   "Pick a job on the left": "Выберите вакансию слева",
   "Job card": "Карточка вакансии",

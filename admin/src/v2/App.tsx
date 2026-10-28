@@ -4,8 +4,9 @@ import { UnauthorizedError, api, forgetToken, getToken, setToken } from "../api"
 import { AppProvider, type ToastKind } from "../app-context"
 import { useLang, useT } from "../i18n"
 import type { AuthUser, Cycle } from "../types"
+import { appliedPresetKey, jobsPresetKey, type AppliedPreset, type JobsPreset } from "./jobs-preset"
 import { MASTER_SCREENS, Sidebar, type Screen } from "./Sidebar"
-import { Applied } from "./screens/Applied"
+import { Applied, rememberAppliedTab } from "./screens/Applied"
 import { Guide } from "./screens/Guide"
 import { Jobs } from "./screens/Jobs"
 import { Lab } from "./screens/Lab"
@@ -89,6 +90,10 @@ export default function App() {
   const [authorized, setAuthorized] = useState(() => Boolean(getToken()))
   const [me, setMe] = useState<AuthUser | null>(null)
   const [screen, setScreen] = useState<Screen>(screenFromHash)
+  // Set only by a company or source link. The sidebar and the hash clear it,
+  // so the saved job filters are what opens from the Jobs tab.
+  const [jobsPreset, setJobsPreset] = useState<JobsPreset | null>(null)
+  const [appliedPreset, setAppliedPreset] = useState<AppliedPreset | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [cycle, setCycle] = useState<Cycle | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -150,7 +155,11 @@ export default function App() {
   }, [me, screen])
 
   useEffect(() => {
-    const follow = () => setScreen(screenFromHash())
+    const follow = () => {
+      setJobsPreset(null)
+      setAppliedPreset(null)
+      setScreen(screenFromHash())
+    }
     window.addEventListener("hashchange", follow)
     return () => window.removeEventListener("hashchange", follow)
   }, [])
@@ -205,6 +214,25 @@ export default function App() {
     [me, notify, logout, refreshTick, sourcesTick, running, cycle?.current_id],
   )
 
+  function showScreen(next: Screen) {
+    setJobsPreset(null)
+    setAppliedPreset(null)
+    setScreen(next)
+  }
+
+  function openJobs(preset: JobsPreset) {
+    setAppliedPreset(null)
+    setJobsPreset(preset)
+    setScreen("jobs")
+  }
+
+  function openApplied(preset: AppliedPreset) {
+    rememberAppliedTab(preset.tab)
+    setJobsPreset(null)
+    setAppliedPreset(preset)
+    setScreen("applied")
+  }
+
   if (!authorized) return <Login onDone={() => setAuthorized(true)} />
 
   return (
@@ -212,7 +240,7 @@ export default function App() {
       <div className="shell">
         <Sidebar
           screen={screen}
-          onScreen={setScreen}
+          onScreen={showScreen}
           me={me}
           cycle={cycle}
           onRun={() => void startCycle()}
@@ -221,17 +249,25 @@ export default function App() {
           onLogout={logout}
         />
         <div className="main">
-          {screen === "today" ? <Today cycle={cycle} onRun={() => void startCycle()} onScreen={setScreen} /> : null}
-          {screen === "jobs" ? <Jobs /> : null}
-          {screen === "applied" ? <Applied /> : null}
+          {screen === "today" ? (
+            <Today
+              cycle={cycle}
+              onRun={() => void startCycle()}
+              onScreen={showScreen}
+              onOpenJob={(id) => openJobs({ kind: "job", id })}
+              onOpenApplied={openApplied}
+            />
+          ) : null}
+          {screen === "jobs" ? <Jobs key={jobsPresetKey(jobsPreset)} preset={jobsPreset} /> : null}
+          {screen === "applied" ? <Applied key={appliedPresetKey(appliedPreset)} preset={appliedPreset} /> : null}
           {screen === "profile" ? <Profile /> : null}
-          {screen === "stats" ? <Stats onScreen={setScreen} /> : null}
-          {screen === "guide" ? <Guide onScreen={setScreen} /> : null}
+          {screen === "stats" ? <Stats onOpenApplied={openApplied} /> : null}
+          {screen === "guide" ? <Guide onScreen={showScreen} /> : null}
           {me?.role === "master" ? (
             <>
-              {screen === "resources" ? <Resources onScreen={setScreen} /> : null}
-              {screen === "settings" ? <Settings onScreen={setScreen} /> : null}
-              {screen === "lab" ? <Lab onScreen={setScreen} /> : null}
+              {screen === "resources" ? <Resources onOpenJobs={openJobs} /> : null}
+              {screen === "settings" ? <Settings onScreen={showScreen} /> : null}
+              {screen === "lab" ? <Lab onScreen={showScreen} /> : null}
             </>
           ) : null}
         </div>

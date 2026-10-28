@@ -5,6 +5,7 @@ import { useAction, useApp, useLoader } from "../../app-context"
 import { formatDate, formatSalary } from "../../components/common"
 import { getLang, useT } from "../../i18n"
 import type { AutoRunSchedule, Cycle, Job, JobStats } from "../../types"
+import type { AppliedPreset } from "../jobs-preset"
 import type { Screen } from "../Sidebar"
 import { rememberJobsTab } from "./Jobs"
 import { CompanyMark, Empty, Icon, Score, Skeletons, ago, shortDate } from "../ui"
@@ -79,7 +80,19 @@ async function upcomingStages(jobs: Job[]): Promise<Upcoming[]> {
   return out.sort((a, b) => a.day.localeCompare(b.day))
 }
 
-export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: () => void; onScreen: (screen: Screen) => void }) {
+export function Today({
+  cycle,
+  onRun,
+  onScreen,
+  onOpenJob,
+  onOpenApplied,
+}: {
+  cycle: Cycle | null
+  onRun: () => void
+  onScreen: (screen: Screen) => void
+  onOpenJob: (id: string) => void
+  onOpenApplied: (preset: AppliedPreset) => void
+}) {
   const t = useT()
   const run = useAction()
   const { me } = useApp()
@@ -115,11 +128,19 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
   })
   const freshCount = fresh ? `${fresh.jobs.length}${fresh.more ? "+" : ""}` : "—"
 
-  const tiles: Array<{ label: string; value: string | number; note: string; tone: string; screen: Screen; jobsTab?: "new" | "later" }> = [
+  const tiles: Array<{
+    label: string
+    value: string | number
+    note: string
+    tone: string
+    screen: Screen
+    jobsTab?: "new" | "later"
+    applied?: AppliedPreset
+  }> = [
     { label: "New", value: freshCount, note: t("on profile, not viewed"), tone: "violet", screen: "jobs", jobsTab: "new" },
     { label: "Later", value: stats?.later ?? "—", note: t("set aside"), tone: "sky", screen: "jobs", jobsTab: "later" },
-    { label: "Waiting", value: stats?.pipeline.waiting ?? "—", note: t("applied, no interview yet"), tone: "amber", screen: "applied" },
-    { label: "Interview", value: stats?.pipeline.interview ?? "—", note: t("in progress"), tone: "green", screen: "applied" },
+    { label: "Waiting", value: stats?.pipeline.waiting ?? "—", note: t("applied, no interview yet"), tone: "amber", screen: "applied", applied: { tab: "applied" } },
+    { label: "Interview", value: stats?.pipeline.interview ?? "—", note: t("in progress"), tone: "green", screen: "applied", applied: { tab: "interview" } },
   ]
 
   function openJobs(tab: "new" | "later") {
@@ -200,6 +221,7 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
             onClick={(event) => {
               event.preventDefault()
               if (tile.jobsTab) openJobs(tile.jobsTab)
+              else if (tile.applied) onOpenApplied(tile.applied)
               else onScreen(tile.screen)
             }}
           >
@@ -241,7 +263,8 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
                 style={{ textDecoration: "none" }}
                 onClick={(event) => {
                   event.preventDefault()
-                  openJobs("new")
+                  rememberJobsTab("new")
+                  onOpenJob(job.id)
                 }}
               >
                 <Score job={job} />
@@ -283,7 +306,7 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
                   style={{ background: "var(--card)", textDecoration: "none" }}
                   onClick={(event) => {
                     event.preventDefault()
-                    onScreen("applied")
+                    onOpenApplied({ tab: "interview", company: item.job.company, jobId: item.job.id })
                   }}
                 >
                   <CompanyMark name={item.job.company} />

@@ -2,13 +2,13 @@ import type { ReactNode } from "react"
 
 import { parseDate, plural } from "../../../components/common"
 import { getLang, useT } from "../../../i18n"
-import type { Screen } from "../../Sidebar"
+import type { JobsPreset } from "../../jobs-preset"
 import { Icon, shortDate } from "../../ui"
 
 export type PaneProps = {
   /** Reports the number the tab shows next to its name; null hides it. */
   onCount: (count: number | null) => void
-  onScreen: (screen: Screen) => void
+  onOpenJobs: (preset: JobsPreset) => void
 }
 
 export type Dir = "asc" | "desc"
@@ -151,14 +151,16 @@ export function TableCard({ children, footer }: { children: ReactNode; footer?: 
   )
 }
 
-/** A link that opens the Jobs screen. Jobs cannot take a company filter from the hash yet. */
+/** Opens Jobs on this company or source, rather than on the filters saved last time. */
 export function JobsLink({
-  onScreen,
+  onOpenJobs,
+  preset,
   title,
   className,
   children,
 }: {
-  onScreen: (screen: Screen) => void
+  onOpenJobs: (preset: JobsPreset) => void
+  preset: JobsPreset
   title?: string
   className?: string
   children: ReactNode
@@ -171,7 +173,7 @@ export function JobsLink({
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
         event.preventDefault()
-        onScreen("jobs")
+        onOpenJobs(preset)
       }}
     >
       {children}

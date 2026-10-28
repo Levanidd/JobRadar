@@ -2,7 +2,7 @@ import { useCallback, useState, type KeyboardEvent } from "react"
 
 import { useT } from "../../i18n"
 import { oneOf, usePersistentState } from "../../persist"
-import type { Screen } from "../Sidebar"
+import type { JobsPreset } from "../jobs-preset"
 import "../resources.css"
 import { DiscoveryPane } from "./resources/DiscoveryPane"
 import { ExplorePane } from "./resources/ExplorePane"
@@ -21,7 +21,7 @@ const PANES: Array<{ id: Pane; label: string }> = [
  * keeps going and a typed list of links survives a look at another tab; the
  * counts on the tabs come from the lists each pane loaded.
  */
-export function Resources({ onScreen }: { onScreen: (screen: Screen) => void }) {
+export function Resources({ onOpenJobs }: { onOpenJobs: (preset: JobsPreset) => void }) {
   const t = useT()
   // Same key as the current admin, so both open on the tab picked last.
   const [pane, setPane] = usePersistentState<Pane>("resources.pane", "sources", oneOf("sources", "discovery", "explore"))
@@ -72,13 +72,13 @@ export function Resources({ onScreen }: { onScreen: (screen: Screen) => void }) 
       </div>
 
       <div role="tabpanel" id="res-panel-sources" aria-labelledby="res-tab-sources" hidden={pane !== "sources"}>
-        <SourcesPane onCount={countSources} onScreen={onScreen} />
+        <SourcesPane onCount={countSources} onOpenJobs={onOpenJobs} />
       </div>
       <div role="tabpanel" id="res-panel-discovery" aria-labelledby="res-tab-discovery" hidden={pane !== "discovery"}>
-        <DiscoveryPane onCount={countDiscovery} onScreen={onScreen} />
+        <DiscoveryPane onCount={countDiscovery} onOpenJobs={onOpenJobs} />
       </div>
       <div role="tabpanel" id="res-panel-explore" aria-labelledby="res-tab-explore" hidden={pane !== "explore"}>
-        <ExplorePane onCount={countExplore} onScreen={onScreen} onSources={toSources} />
+        <ExplorePane onCount={countExplore} onOpenJobs={onOpenJobs} onSources={toSources} />
       </div>
     </div>
   )

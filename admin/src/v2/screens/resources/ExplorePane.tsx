@@ -45,7 +45,7 @@ function sortValue(company: ExploreCompany, sort: SortKey): string | number {
   return company.best_score ?? -1
 }
 
-export function ExplorePane({ onCount, onScreen, onSources }: PaneProps & { onSources: () => void }) {
+export function ExplorePane({ onCount, onOpenJobs, onSources }: PaneProps & { onSources: () => void }) {
   const t = useT()
   const run = useAction()
   const { notify, logout, refresh, touchSources, cycleRunning } = useApp()
@@ -398,7 +398,12 @@ export function ExplorePane({ onCount, onScreen, onSources }: PaneProps & { onSo
                       return (
                         <tr key={company.company_key} className={working ? "is-busy" : ""}>
                           <td className="res-first">
-                            <JobsLink onScreen={onScreen} className="res-strong-link" title={t("Open Jobs")}>
+                            <JobsLink
+                              onOpenJobs={onOpenJobs}
+                              preset={{ kind: "company", key: company.company_key, name: company.company }}
+                              className="res-strong-link"
+                              title={t("Open Jobs")}
+                            >
                               {company.company}
                             </JobsLink>
                           </td>

@@ -3,12 +3,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { api } from "../../api"
 import { useAction, useLoader } from "../../app-context"
 import { useT } from "../../i18n"
-import { usePersistentState } from "../../persist"
+import { saveStored, usePersistentState } from "../../persist"
+import type { AppliedPreset } from "../jobs-preset"
 import type { Job, JobStats, JobStatus } from "../../types"
 import { JobPanel, inPipeline } from "../JobPanel"
 import { CompanyMark, Empty, Icon, Skeletons, daysSince, shortDate } from "../ui"
 
 type Tab = "" | "applied" | "interview" | "rejected"
+
+const APPLIED_TAB_KEY = "v2.applied.tab"
 
 const TABS: Array<{ id: Tab; label: string; dot: string }> = [
   { id: "", label: "All", dot: "dot-violet" },
@@ -158,20 +161,26 @@ function OwnJobForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: 
   )
 }
 
-export function Applied() {
+/** Writes the tab before Applied mounts, so a click from Today or Stats is the tab that opens. */
+export function rememberAppliedTab(tab: Tab): void {
+  saveStored(APPLIED_TAB_KEY, tab)
+}
+
+export function Applied({ preset }: { preset: AppliedPreset | null }) {
   const t = useT()
   const run = useAction()
-  const [tab, setTab] = usePersistentState<Tab>("v2.applied.tab", "", (raw) =>
+  const focusJob = useRef(preset?.jobId ?? null)
+  const [tab, setTab] = usePersistentState<Tab>(APPLIED_TAB_KEY, "", (raw) =>
     TABS.some((item) => item.id === raw) ? (raw as Tab) : undefined,
   )
-  const [interviewed, setInterviewed] = useState<"" | "yes" | "no">("")
-  const [companyInput, setCompanyInput] = useState("")
-  const [company, setCompany] = useState("")
+  const [interviewed, setInterviewed] = useState<"" | "yes" | "no">(preset?.interviewed ?? "")
+  const [companyInput, setCompanyInput] = useState(preset?.company ?? "")
+  const [company, setCompany] = useState(preset?.company ?? "")
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [stats, setStats] = useState<JobStats | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(preset?.jobId ?? null)
   const [detail, setDetail] = useState<Job | null>(null)
-  const [showDetail, setShowDetail] = useState(false)
+  const [showDetail, setShowDetail] = useState(Boolean(preset?.jobId))
   const [adding, setAdding] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ rejected: true })
   const [scoring, setScoring] = useState<string | null>(null)
@@ -201,6 +210,20 @@ export function Applied() {
   )
 
   useLoader(load)
+
+  // The row clicked on Today is opened once its list has arrived.
+  useEffect(() => {
+    const id = focusJob.current
+    if (!id || !jobs?.some((job) => job.id === id)) return
+    focusJob.current = null
+    setSelectedId(id)
+    setShowDetail(true)
+    setAdding(false)
+    setDetail(null)
+    void run(() => api.job(id)).then((result) => {
+      if (result) setDetail((prev) => (prev && prev.id !== id ? prev : result.job))
+    })
+  }, [jobs, run])
 
   const groups = useMemo<Group[]>(() => {
     if (!jobs) return []

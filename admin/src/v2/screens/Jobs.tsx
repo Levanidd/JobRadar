@@ -6,6 +6,7 @@ import { formatSalary } from "../../components/common"
 import { useT } from "../../i18n"
 import { mergeStored, usePersistentState } from "../../persist"
 import type { Job, JobStatus } from "../../types"
+import type { JobsPreset } from "../jobs-preset"
 import { JobPanel, inPipeline } from "../JobPanel"
 import { Empty, Icon, Score, Skeletons, ago, flagLabels, repostLabel } from "../ui"
 
@@ -59,7 +60,7 @@ function revivePrefs(raw: unknown): Prefs | undefined {
   }
 }
 
-function toFilters(prefs: Prefs, company: { key: string } | null): JobFilters {
+function toFilters(prefs: Prefs): JobFilters {
   const marks: JobFilters =
     prefs.tab === "new"
       ? { applied: "no", later: "no", viewed: "no" }
@@ -71,10 +72,30 @@ function toFilters(prefs: Prefs, company: { key: string } | null): JobFilters {
   return {
     ...marks,
     status: prefs.scope || undefined,
-    min_score: company ? 0 : prefs.min_score,
+    min_score: prefs.min_score,
     added_days: prefs.added_days,
     tier: prefs.tier,
-    companies: company ? [company.key] : undefined,
+    sort: prefs.sort,
+    dir: "desc",
+  }
+}
+
+/** The list opened from Resources. Score, dates and the saved tab stay untouched. */
+type Pinned = {
+  preset: Exclude<JobsPreset, { kind: "job" }>
+  added_days?: number
+  tier?: string
+  scope: "" | "any"
+}
+
+function pinnedFilters(prefs: Prefs, pinned: Pinned): JobFilters {
+  return {
+    status: pinned.scope || undefined,
+    min_score: 0,
+    added_days: pinned.added_days,
+    tier: pinned.tier,
+    companies: pinned.preset.kind === "company" ? [pinned.preset.key] : undefined,
+    source_id: pinned.preset.kind === "source" ? pinned.preset.id : undefined,
     sort: prefs.sort,
     dir: "desc",
   }
@@ -91,25 +112,29 @@ function fitsTab(job: Job, tab: Tab): boolean {
 
 const PAGE_SIZE = 50
 
-export function Jobs() {
+export function Jobs({ preset }: { preset: JobsPreset | null }) {
   const t = useT()
   const run = useAction()
   const { notify } = useApp()
   const [prefs, setPrefs] = usePersistentState<Prefs>(JOBS_PREFS_KEY, DEFAULT_PREFS, revivePrefs)
-  const [company, setCompany] = useState<{ key: string; name: string } | null>(null)
+  const focusJob = useRef(preset?.kind === "job" ? preset.id : null)
+  const [pinned, setPinned] = useState<Pinned | null>(() =>
+    preset && preset.kind !== "job" ? { preset, scope: "any" } : null,
+  )
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [nextOffset, setNextOffset] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(focusJob.current)
   const [detail, setDetail] = useState<Job | null>(null)
-  const [showDetail, setShowDetail] = useState(false)
+  const [showDetail, setShowDetail] = useState(focusJob.current !== null)
   const [scoring, setScoring] = useState<string | null>(null)
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
   const generation = useRef(0)
   const previous = useRef(new Map<string, JobStatus>())
 
-  const filters = toFilters(prefs, company)
+  const filters = pinned ? pinnedFilters(prefs, pinned) : toFilters(prefs)
+  const listTab: Tab = pinned ? "all" : prefs.tab
   const filterKey = JSON.stringify(filters)
 
   const load = useCallback(
@@ -123,7 +148,10 @@ export function Jobs() {
       setJobs(list)
       setHasMore(result.has_more)
       setNextOffset(result.next_offset)
-      setSelectedId((prev) => (prev && list.some((job) => job.id === prev) ? prev : (list[0]?.id ?? null)))
+      setSelectedId((prev) => {
+        if (prev && (list.some((job) => job.id === prev) || prev === focusJob.current)) return prev
+        return list[0]?.id ?? null
+      })
     },
     [run, filterKey],
   )
@@ -184,7 +212,7 @@ export function Jobs() {
       const index = prev.findIndex((job) => job.id === id)
       const updated = prev.map((job) => (job.id === id ? { ...job, ...next } : job))
       const target = updated[index]
-      if (!move || !target || fitsTab(target, prefs.tab)) return updated
+      if (!move || !target || fitsTab(target, listTab)) return updated
       // The row leaves the tab, and the card moves on to the next one in line.
       const rest = updated.filter((job) => job.id !== id)
       const following = rest[index] ?? rest[index - 1] ?? null
@@ -290,18 +318,25 @@ export function Jobs() {
                 key={tab.id}
                 type="button"
                 role="tab"
-                aria-selected={prefs.tab === tab.id}
-                onClick={() => update("tab", tab.id)}
+                aria-selected={listTab === tab.id}
+                onClick={() => {
+                  setPinned(null)
+                  update("tab", tab.id)
+                }}
               >
                 {t(tab.label)}
               </button>
             ))}
           </div>
           <div className="filters">
-            {company ? (
+            {pinned ? (
               <span className="filter-chip">
-                {company.name}
-                <button type="button" aria-label={t("Clear the company filter")} onClick={() => setCompany(null)}>
+                {pinned.preset.kind === "company" ? pinned.preset.name : pinned.preset.label}
+                <button
+                  type="button"
+                  aria-label={t(pinned.preset.kind === "company" ? "Clear the company filter" : "Clear the source filter")}
+                  onClick={() => setPinned(null)}
+                >
                   ×
                 </button>
               </span>
@@ -323,8 +358,12 @@ export function Jobs() {
             <select
               className="select"
               aria-label={t("Added")}
-              value={prefs.added_days ?? ""}
-              onChange={(event) => update("added_days", event.target.value ? Number(event.target.value) : undefined)}
+              value={pinned ? (pinned.added_days ?? "") : (prefs.added_days ?? "")}
+              onChange={(event) => {
+                const added_days = event.target.value ? Number(event.target.value) : undefined
+                if (pinned) setPinned({ ...pinned, added_days })
+                else update("added_days", added_days)
+              }}
             >
               <option value="">{t("Any time")}</option>
               <option value="1">{t("Today")}</option>
@@ -335,19 +374,27 @@ export function Jobs() {
             <select
               className="select"
               aria-label={t("Boards")}
-              value={prefs.tier ?? ""}
-              onChange={(event) => update("tier", event.target.value || undefined)}
+              value={pinned ? (pinned.tier ?? "") : (prefs.tier ?? "")}
+              onChange={(event) => {
+                const tier = event.target.value || undefined
+                if (pinned) setPinned({ ...pinned, tier })
+                else update("tier", tier)
+              }}
             >
               <option value="">{t("All boards")}</option>
               <option value="watchlist">Watchlist</option>
               <option value="discovery">Discovery</option>
             </select>
-            {prefs.tab !== "hidden" ? (
+            {listTab !== "hidden" ? (
               <select
                 className="select"
                 aria-label={t("Status")}
-                value={prefs.scope}
-                onChange={(event) => update("scope", event.target.value === "any" ? "any" : "")}
+                value={pinned ? pinned.scope : prefs.scope}
+                onChange={(event) => {
+                  const scope = event.target.value === "any" ? "any" : ""
+                  if (pinned) setPinned({ ...pinned, scope })
+                  else update("scope", scope)
+                }}
               >
                 <option value="">{t("On profile")}</option>
                 <option value="any">{t("Including filtered out")}</option>
@@ -437,8 +484,7 @@ export function Jobs() {
               onToggleViewed: () => void toggleViewed(current),
               onRescore: () => void rescore(current),
               onOpenCompany: (job) => {
-                setCompany({ key: job.company_key, name: job.company })
-                update("tab", "all")
+                setPinned({ preset: { kind: "company", key: job.company_key, name: job.company }, scope: "any" })
               },
               onOpenJob: (id) => void openById(id),
               onJob: (job) => {

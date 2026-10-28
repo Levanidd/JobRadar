@@ -27,6 +27,11 @@ export function mergeStored(key: string, patch: Record<string, unknown>): void {
   write(key, { ...base, ...patch })
 }
 
+/** Replaces one stored value before the screen that reads it is mounted. */
+export function saveStored(key: string, value: unknown): void {
+  write(key, value)
+}
+
 /**
  * useState that survives a reload, for the filters a user picked by hand.
  *
