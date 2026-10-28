@@ -2,16 +2,9 @@ import type { Salary } from "./salary"
 
 export type { Salary }
 
-export type UserRole = "master" | "user"
+import type { AuthUser } from "../shared/domain"
 
-export type AuthUser = {
-  id: number
-  name: string
-  role: UserRole
-}
-
-/** Master-only view: `token` is null for the master bootstrapped from ADMIN_TOKEN. */
-export type ManagedUser = AuthUser & { token: string | null }
+export type { AuthUser, ManagedUser, UserRole } from "../shared/domain"
 
 export type AppEnv = {
   Bindings: Bindings

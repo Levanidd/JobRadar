@@ -7,7 +7,7 @@
     "dev": "wrangler d1 migrations apply job-scout --local && wrangler dev --port 43142 --ip 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "typecheck:admin": "npm --prefix admin run typecheck",
-    "test": "npm run typecheck && vitest run",
+    "test": "npm run typecheck && npm run typecheck:admin && vitest run",
     "eval": "tsx scripts/eval.ts",
     "build": "npm --prefix admin ci && npm --prefix admin run build",
     "admin:dev": "npm --prefix admin run dev",

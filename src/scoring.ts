@@ -1,5 +1,6 @@
 import { pick } from "./locale"
-import { passesPrefilter, clipDescription } from "./prefilter"
+import { clipDescription } from "./prefilter"
+import { SCORING_PROVIDERS, THINKING_LEVELS, type ModelOption, type ScoringProvider, type ThinkingLevel } from "../shared/domain"
 
 export type ScoreInput = {
   external_id: string
@@ -18,8 +19,8 @@ export type ScoreOutput = {
 
 export const DEFAULT_MODEL = "gemini-3.7-flash"
 
-export const SCORING_PROVIDERS = ["gemini", "nebius"] as const
-export type ScoringProvider = (typeof SCORING_PROVIDERS)[number]
+export { SCORING_PROVIDERS, THINKING_LEVELS }
+export type { ModelOption, ScoringProvider, ThinkingLevel }
 export const DEFAULT_PROVIDER: ScoringProvider = "gemini"
 
 export const DEFAULT_NEBIUS_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
@@ -30,9 +31,6 @@ const PROVIDER_NAMES: Record<ScoringProvider, string> = { gemini: "Gemini", nebi
 export function isScoringProvider(value: string): value is ScoringProvider {
   return (SCORING_PROVIDERS as readonly string[]).includes(value)
 }
-
-export const THINKING_LEVELS = ["LOW", "MEDIUM", "HIGH"] as const
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
 
 /** Scoring is classification, not reasoning — deeper thinking mostly buys output tokens. */
 export const DEFAULT_THINKING_LEVEL: ThinkingLevel = "LOW"
@@ -472,7 +470,6 @@ function resolveTarget(config: ScoringConfig & { apiKey: string }): Target {
 }
 
 /** Prices are dollars per million tokens; only Nebius publishes them through its API. */
-export type ModelOption = { id: string; label: string; price_in_per_m?: number; price_out_per_m?: number }
 
 const MODEL_ALIASES = new Set(["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest"])
 const NON_SCORING = /tts|image|transcribe|omni|robotics|customtools|research|nano-banana|lyria|embedding|computer/

@@ -11,7 +11,8 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": false,
-    "noImplicitAny": true
+    "noImplicitAny": true,
+    "noUnusedLocals": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "shared/**/*.ts", "test/**/*.ts"]
 }

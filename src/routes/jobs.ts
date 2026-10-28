@@ -7,12 +7,13 @@ import { rekeyDedupBatch, unlinkDedupBatch } from "../dedup-rekey"
 import { createManualJob, prefilterAndScore, scoreJobsByIds, scoreOneJob, setPrimaryListing } from "../ingest"
 import { backfillJobTexts, backfillTextHashes, JOB_DESCRIPTION, JOB_TEXT_JOIN } from "../job-text"
 import { QuotaError } from "../quota"
+import { JOB_STATUSES } from "../../shared/domain"
 import type { AppEnv } from "../types"
 import { JOB_COLUMNS, JOB_SOURCE, appliedFilters, jobFilters, jobOrder, jobsFromUser, userJobsHint } from "./job-query"
 
 export const jobs = new Hono<AppEnv>()
 
-const STATUSES = ["new", "notified", "saved", "applied", "interview", "rejected", "ignored", "off_profile"]
+const STATUSES: readonly string[] = JOB_STATUSES
 
 /** Empty clears the link; anything that is not an http(s) URL is refused, since the card opens it. */
 function cleanCvUrl(raw: unknown): string | null | false {
