@@ -1,0 +1,756 @@
+/* Settings screen (#settings). Every class is prefixed with set- so it cannot leak
+   into other screens; colours come from the tokens in v2.css. */
+
+.set-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.set-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  align-items: flex-start;
+}
+
+/* ── Section index ───────────────────────────────────── */
+
+.set-index {
+  flex: 1 1 180px;
+  max-width: 200px;
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+}
+
+.set-index a {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  color: var(--tx-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.set-index a:hover {
+  background: var(--nav-active);
+  color: var(--tx);
+}
+
+.set-index a[aria-current="location"] {
+  background: var(--nav-active);
+  color: var(--tx);
+  font-weight: 600;
+}
+
+.set-sections {
+  flex: 999 1 600px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.set-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-margin-top: 20px;
+}
+
+.set-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+
+.set-section-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.set-section-title:focus {
+  outline: none;
+}
+
+.set-sub {
+  font-size: 13px;
+  color: var(--tx-2);
+}
+
+.set-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tx-2);
+  line-height: 1.55;
+}
+
+.set-alert {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--red-line);
+  background: var(--red-bg);
+  color: var(--red-tx);
+  font-size: 13px;
+}
+
+/* ── Cards and fields ────────────────────────────────── */
+
+.set-card {
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.set-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.set-card-head-text {
+  align-items: baseline;
+}
+
+.set-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.set-status {
+  font-size: 13px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  overflow-wrap: anywhere;
+}
+
+.set-status b {
+  font-weight: 600;
+}
+
+.set-status-ok {
+  background: var(--green-bg);
+  color: var(--green-tx);
+}
+
+.set-status-warn {
+  background: var(--amber-bg);
+  color: var(--amber-tx);
+}
+
+.set-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.set-label {
+  font-size: 12px;
+  color: var(--tx-2);
+}
+
+.set-grow {
+  flex: 1 1 260px;
+}
+
+.set-push {
+  margin-left: auto;
+}
+
+.set-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.set-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.set-fieldset legend {
+  padding: 0;
+  margin-bottom: 8px;
+}
+
+.set-providers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.set-provider {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  cursor: pointer;
+}
+
+.set-provider.is-checked {
+  border: 1.5px solid var(--acc);
+  background: var(--violet-bg);
+  padding: 13.5px 15.5px;
+}
+
+.set-provider input {
+  margin: 3px 0 0;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--acc);
+}
+
+.set-provider-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.set-provider-name {
+  font-weight: 600;
+}
+
+.set-provider-key {
+  font-size: 12px;
+  color: var(--tx-2);
+}
+
+.set-provider-key.is-set {
+  color: var(--green-tx);
+}
+
+.set-provider-key a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.set-model-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px 24px;
+}
+
+.select.set-select {
+  height: 40px;
+  border-radius: 12px;
+  padding: 0 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.textarea.set-mono-area {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  border-radius: 14px;
+}
+
+/* ── Auto-run ────────────────────────────────────────── */
+
+.set-switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.set-switch {
+  flex: none;
+  width: 44px;
+  height: 26px;
+  padding: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--line);
+  display: inline-flex;
+  justify-content: flex-start;
+  transition: background 0.15s;
+}
+
+.set-switch[aria-checked="true"] {
+  background: var(--acc);
+  box-shadow: none;
+  justify-content: flex-end;
+}
+
+.set-switch-knob {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.set-switch-label {
+  font-weight: 600;
+}
+
+.set-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.set-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 4px 0 12px;
+  border-radius: 999px;
+  background: var(--violet-bg);
+  color: var(--violet-tx);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.set-time button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.set-time button:hover:not(:disabled) {
+  background: var(--violet-line);
+}
+
+.set-time-new .input {
+  height: 36px;
+}
+
+.set-times .btn {
+  height: 36px;
+}
+
+/* ── Tables ──────────────────────────────────────────── */
+
+.set-table-card {
+  overflow: hidden;
+}
+
+/* Positioned, so the visually hidden header text stays inside the scroll box
+   instead of widening the page. */
+.set-scroll {
+  position: relative;
+  overflow-x: auto;
+}
+
+.set-scroll:focus-visible {
+  outline-offset: -2px;
+}
+
+.set-table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.set-table th {
+  padding: 14px 10px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tx-2);
+  vertical-align: bottom;
+}
+
+.set-table td {
+  padding: 11px 10px;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.set-table th:first-child,
+.set-table td:first-child {
+  padding-left: 18px;
+}
+
+.set-table th:last-child,
+.set-table td:last-child {
+  padding-right: 18px;
+}
+
+.set-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.set-table .nowrap {
+  white-space: nowrap;
+}
+
+.set-table tr.is-open {
+  background: var(--card-2);
+}
+
+.set-model-cell {
+  font-size: 12px;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.set-model-cell.is-text {
+  white-space: normal;
+  min-width: 140px;
+}
+
+.set-expander-cell {
+  width: 1%;
+  text-align: right;
+}
+
+.set-expander svg {
+  transition: transform 0.15s;
+}
+
+.set-expander[aria-expanded="true"] {
+  color: var(--tx);
+  border-color: var(--violet-line);
+}
+
+.set-expander[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.set-batch-detail {
+  background: var(--card-2);
+}
+
+.set-table .set-batch-detail td {
+  border-top: 0;
+  padding-top: 2px;
+  padding-bottom: 14px;
+}
+
+.set-reqs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 2px solid var(--violet-line);
+  padding-left: 14px;
+}
+
+.set-reqs-facts {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--tx-2);
+}
+
+.set-reqs-facts b {
+  color: var(--tx);
+  font-weight: 600;
+}
+
+.set-req-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.set-req {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+  padding: 7px 0;
+  font-size: 12px;
+  color: var(--tx-2);
+}
+
+.set-req + .set-req {
+  border-top: 1px dashed var(--line);
+}
+
+.set-req-time {
+  color: var(--tx);
+}
+
+.set-good {
+  color: var(--green-tx);
+  font-weight: 500;
+}
+
+.set-bad {
+  color: var(--red-tx);
+  font-weight: 500;
+}
+
+.set-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.set-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.set-state-green {
+  color: var(--green-tx);
+}
+
+.set-state-violet {
+  color: var(--violet-tx);
+}
+
+.set-state-red {
+  color: var(--red-tx);
+}
+
+.set-state-gray {
+  color: var(--tx-2);
+}
+
+.set-error-text {
+  margin-top: 2px;
+  max-width: 260px;
+  font-size: 12px;
+  color: var(--red-tx);
+  overflow-wrap: anywhere;
+}
+
+.set-table-skeleton {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.set-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--tx-2);
+}
+
+.set-pager-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Users ───────────────────────────────────────────── */
+
+.set-users {
+  padding: 6px 0 0;
+}
+
+.set-user-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.set-user {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.set-avatar {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--sky-bg);
+  color: var(--sky-tx);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.set-avatar.is-master {
+  background: var(--violet-bg);
+  color: var(--violet-tx);
+}
+
+.set-user-name {
+  flex: 1 1 140px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.set-user-name b {
+  font-weight: 600;
+}
+
+.set-token {
+  flex: 0 1 200px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--tx-2);
+  overflow-wrap: anywhere;
+}
+
+.set-token-value {
+  font-family: inherit;
+  color: var(--tx);
+  user-select: all;
+}
+
+/* Actions get a line of their own under the name, so every row lines up the same way. */
+.set-user-actions {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 52px;
+}
+
+.btn.set-link-btn {
+  color: var(--violet-tx);
+}
+
+.set-new-user {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  padding: 16px 20px 18px;
+}
+
+.set-new-user .input {
+  height: 40px;
+  border-radius: 12px;
+}
+
+.set-new-user .btn {
+  height: 40px;
+}
+
+/* ── One user's profile ──────────────────────────────── */
+
+.set-back {
+  margin-left: -10px;
+}
+
+.set-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.set-inline-form {
+  display: flex;
+  gap: 8px;
+  max-width: 480px;
+}
+
+.set-inline-form .select {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+}
+
+/* ── Narrow screens: the index sits above the sections as a row of pills ── */
+
+@media (max-width: 960px) {
+  /* One column: without nowrap the line would grow to the widest table. */
+  .set-layout {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 18px;
+  }
+
+  .set-index {
+    position: static;
+    max-width: none;
+    flex: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 0;
+  }
+
+  .set-index a {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    font-size: 13px;
+  }
+
+  .set-index a[aria-current="location"] {
+    border-color: var(--violet-line);
+    background: var(--violet-bg);
+    color: var(--violet-tx);
+  }
+
+  .set-sections {
+    flex: none;
+    gap: 28px;
+  }
+
+  .set-card {
+    padding: 18px 16px;
+  }
+
+  .set-user {
+    padding: 12px 16px;
+  }
+
+  .set-new-user {
+    padding: 14px 16px 16px;
+  }
+
+  .set-push {
+    margin-left: 0;
+  }
+
+  .set-user-actions {
+    padding-left: 0;
+  }
+}
