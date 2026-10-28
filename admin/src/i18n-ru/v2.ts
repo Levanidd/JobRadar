@@ -1,9 +1,9 @@
 /** Russian for the redesign at /v2/. Keys are the English strings passed to t(). */
 export const ru: Record<string, string> = {
   "Main navigation": "Основная навигация",
-  "Current interface": "Текущий интерфейс",
+  "Old design": "Старый дизайн",
   "This screen is not redesigned yet.": "Этот экран ещё не перерисован.",
-  "Open it in the current interface": "Открыть в текущем интерфейсе",
+  "Open it in the current interface": "Открыть в старом дизайне",
   "New design": "Новый дизайн",
   "Light theme": "Светлая тема",
   "Dark theme": "Тёмная тема",

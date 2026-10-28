@@ -113,9 +113,9 @@ export function Sidebar({
       ) : null}
       <div className="nav-group">
         {item("guide", "Guide", "book")}
-        <a className="nav-item" href="/">
+        <a className="nav-item" href="/?classic">
           <Icon name="back" />
-          {t("Current interface")}
+          {t("Old design")}
         </a>
       </div>
       <div className="side-foot">

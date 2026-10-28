@@ -239,11 +239,11 @@ export default function App() {
         <header className="header">
           <h1>JobRadar</h1>
           <div className="header-actions">
-            {me ? <span className="muted">{me.name}</span> : null}
-            <LanguageSwitch />
             <a className="btn btn-ghost btn-sm" href="/v2/">
               {t("New design")}
             </a>
+            {me ? <span className="muted">{me.name}</span> : null}
+            <LanguageSwitch />
             <button
               className="btn btn-primary btn-sm"
               disabled={running}
