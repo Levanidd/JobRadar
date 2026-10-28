@@ -1,5 +1,5 @@
 import { pick } from "./locale"
-import { passesPrefilter, clipDescription } from "./prefilter"
+import { clipDescription } from "./prefilter"
 
 export type ScoreInput = {
   external_id: string
