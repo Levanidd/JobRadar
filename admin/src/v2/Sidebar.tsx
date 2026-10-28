@@ -4,7 +4,10 @@ import type { AuthUser, Cycle } from "../types"
 import type { Theme } from "./theme"
 import { Icon } from "./ui"
 
-export type Screen = "today" | "jobs" | "applied" | "profile"
+export type Screen = "today" | "jobs" | "applied" | "profile" | "stats" | "resources" | "settings" | "lab" | "guide"
+
+/** Screens only the master sees. Anyone else who lands on one goes back to Today. */
+export const MASTER_SCREENS: Screen[] = ["resources", "settings", "lab"]
 
 const PHASE: Record<Cycle["phase"], string> = {
   sources: "Boards",
@@ -87,17 +90,6 @@ export function Sidebar({
       {t(label)}
     </a>
   )
-  // Screens the redesign does not cover yet open in the current admin.
-  const legacy = (hash: string, label: string, icon: Parameters<typeof Icon>[0]["name"]) => (
-    <a className="nav-item" href={`/#${hash}`} title={t("Opens in the current interface")}>
-      <Icon name={icon} />
-      {t(label)}
-      <span className="external">
-        <Icon name="external" size={13} />
-      </span>
-    </a>
-  )
-
   return (
     <nav className="side" aria-label={t("Main navigation")}>
       <div className="brand">
@@ -109,18 +101,18 @@ export function Sidebar({
         {item("jobs", "Jobs", "briefcase")}
         {item("applied", "Applied", "check-circle")}
         {item("profile", "Profile", "person")}
-        {legacy("stats", "Stats", "chart")}
+        {item("stats", "Stats", "chart")}
       </div>
       {me?.role === "master" ? (
         <div className="nav-group">
           <div className="nav-label">{t("Master")}</div>
-          {legacy("resources", "Resources", "layers")}
-          {legacy("settings", "Settings", "gear")}
-          {legacy("lab", "Lab", "flask")}
+          {item("resources", "Resources", "layers")}
+          {item("settings", "Settings", "gear")}
+          {item("lab", "Lab", "flask")}
         </div>
       ) : null}
       <div className="nav-group">
-        {legacy("guide", "Guide", "book")}
+        {item("guide", "Guide", "book")}
         <a className="nav-item" href="/">
           <Icon name="back" />
           {t("Current interface")}
