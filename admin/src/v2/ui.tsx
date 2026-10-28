@@ -206,7 +206,9 @@ export function daysSince(value: string | null | undefined): number | null {
 
 /** «12 Oct» / «12 окт». */
 export function shortDate(value: string | null | undefined): string {
-  const date = parseDate(value ?? null)
+  // Stage days come as a bare `YYYY-MM-DD`; read them as a local day, as the current card does.
+  const date = value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : parseDate(value ?? null)
+  if (date && Number.isNaN(date.getTime())) return value ?? "—"
   if (!date) return "—"
   return date.toLocaleDateString(getLang() === "ru" ? "ru-RU" : "en-GB", { day: "numeric", month: "short" })
 }
