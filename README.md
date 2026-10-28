@@ -138,7 +138,7 @@ A separate Worker, `jobradar-mcp`, will sit beside this one and use the same D1.
 
 Ten tools, five to read and five to write, all scoped to that person: search and list jobs, open one job, list applications, read the profile, set a status (`saved`, `applied`, `interview`, `rejected`, `ignored`), write `claude_comment`, save an `https` CV link, add an interview stage, update the profile. `new`, `notified` and `off_profile` stay owned by JobRadar. The catalog fields of `jobs` are readable. The old per-user columns still sitting on `jobs`, and `applied_history`, are not. CV files stay wherever the person keeps them. This server stores the link only.
 
-Today `/api/mcp` on this Worker is a different thing: read-only SQL (`schema` and one `SELECT`) for the operator, with the same personal token. The next release does not extend it.
+This Worker has no MCP endpoint today. The earlier `/api/mcp` (read-only SQL) was removed: it accepted any personal token, so a regular user could read other people's rows, including `users.token`.
 
 ## Limits
 
