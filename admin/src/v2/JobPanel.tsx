@@ -430,6 +430,27 @@ function Duplicates({ job, onJob }: { job: Job; onJob: (job: Job) => void }) {
   )
 }
 
+/* ── Links inside free text become clickable ─────────────────────────────── */
+
+const URL_PATTERN = /(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]])/g
+
+function Linked({ text }: { text: string }) {
+  const parts = text.split(URL_PATTERN)
+  return (
+    <>
+      {parts.map((part, index) =>
+        index % 2 === 1 ? (
+          <a key={index} href={part} target="_blank" rel="noreferrer noopener">
+            {part}
+          </a>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  )
+}
+
 /* ── The card ───────────────────────────────────────────────────────────── */
 
 export type PanelHandlers = {
@@ -684,7 +705,7 @@ export function JobPanel({
             </h3>
             {job.claude_comment ? (
               <p className="prose" style={{ whiteSpace: "pre-line" }}>
-                {job.claude_comment}
+                <Linked text={job.claude_comment} />
               </p>
             ) : (
               <p className="prose faint">{t("Nothing yet")}</p>

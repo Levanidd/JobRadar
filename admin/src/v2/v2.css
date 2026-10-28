@@ -997,6 +997,8 @@ button:disabled {
 .prose {
   margin: 0;
   line-height: 1.65;
+  /* Long links and tokens break instead of running out of the column. */
+  overflow-wrap: anywhere;
 }
 
 .notes {
@@ -1015,6 +1017,7 @@ button:disabled {
 }
 
 .description {
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 12px;
