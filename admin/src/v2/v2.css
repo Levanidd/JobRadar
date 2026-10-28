@@ -233,11 +233,6 @@ button:disabled {
   font-weight: 600;
 }
 
-.nav-item .external {
-  margin-left: auto;
-  opacity: 0.6;
-}
-
 .side-foot {
   margin-top: auto;
   display: flex;
