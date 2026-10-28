@@ -95,11 +95,6 @@ export function FeedIllo() {
           {t("Hide")}
         </span>
       </span>
-      <span className="guide-line muted">
-        <Icon name="eye" size={13} />
-        {t("Not viewed")}
-        <span style={{ color: "var(--violet-tx)", fontWeight: 500 }}>{t("Mark")}</span>
-      </span>
     </Frame>
   )
 }
