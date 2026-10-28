@@ -5,6 +5,7 @@ import { useAction, useApp, useLoader } from "../app-context"
 import { Empty, formatDate, Skeletons } from "../components/common"
 import { ConfirmDialog } from "../components/ConfirmDialog"
 import { FlaskIcon, PlusIcon, TrashIcon } from "../components/icons"
+import { hashParts, useHashChange, useInterval } from "../hooks"
 import { useT } from "../i18n"
 import { candidateName, isLive, LAB_STATUS, usd, type CloneSource } from "../lab-format"
 import type { LabRunList, LabRunListItem, LabStatus } from "../types"
@@ -15,7 +16,7 @@ import { LabRunScreen } from "./LabRun"
 type View = { kind: "list" } | { kind: "new"; source?: CloneSource } | { kind: "run"; id: number }
 
 function viewFromHash(): View {
-  const id = Number(window.location.hash.slice(1).split("/")[1])
+  const id = Number(hashParts()[1])
   return Number.isInteger(id) && id > 0 ? { kind: "run", id } : { kind: "list" }
 }
 
@@ -25,17 +26,13 @@ export function Lab() {
 
   useEffect(() => {
     // A hash that leaves the lab (the guide, for example) belongs to the app shell.
-    if (window.location.hash.slice(1).split("/")[0] !== "lab") return
+    if (hashParts()[0] !== "lab") return
     const hash = view.kind === "run" ? `#lab/${view.id}` : "#lab"
     if (window.location.hash !== hash) window.history.replaceState(null, "", hash)
     window.scrollTo({ top: 0 })
   }, [view])
 
-  useEffect(() => {
-    const follow = () => setView(viewFromHash())
-    window.addEventListener("hashchange", follow)
-    return () => window.removeEventListener("hashchange", follow)
-  }, [])
+  useHashChange(() => setView(viewFromHash()))
 
   const list = useCallback(() => setView({ kind: "list" }), [])
   const open = useCallback((id: number) => setView({ kind: "run", id }), [])
@@ -126,11 +123,7 @@ function LabRunHistory({
   useLoader(load)
 
   const live = list?.runs.some((item) => isLive(item.status)) ?? false
-  useEffect(() => {
-    if (!live) return
-    const timer = window.setInterval(() => void load(), 5000)
-    return () => window.clearInterval(timer)
-  }, [live, load])
+  useInterval(() => void load(), 5000, live)
 
   async function remove() {
     if (!deleting) return
