@@ -54,10 +54,8 @@ export const ru: Record<string, string> = {
     "«{applied}» переносит вакансию в «{applied}» и в статистику.",
   "“{later}” sets it aside in the “{later}” tab; press it again to bring the job back.":
     "«{later}» откладывает её во вкладку «{later}», повторное нажатие возвращает.",
-  "“{hide}” takes it out of the feed. It waits in the “{hidden}” tab, where “{restore}” brings it back.":
-    "«{hide}» убирает её из ленты. Она будет во вкладке «{hidden}», оттуда её вернёт «{restore}».",
-  "“{mark}” under the buttons marks the job as viewed: it moves from “{new}” to “{viewed}”. Opening a card marks nothing by itself.":
-    "«{mark}» под кнопками помечает вакансию просмотренной: она переедет из «{new}» в «{viewed}». Само открытие карточки ничего не отмечает.",
+  "“{hide}” takes it out of the feed into the “{hidden}” tab, where “{restore}” brings it back. Opening a card hides nothing by itself.":
+    "«{hide}» убирает её из ленты во вкладку «{hidden}», оттуда её вернёт «{restore}». Само открытие карточки ничего не скрывает.",
 
   "The card": "Карточка",
   "The job card": "Карточка вакансии",

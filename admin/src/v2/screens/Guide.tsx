@@ -122,15 +122,10 @@ export function Guide({ onScreen }: { onScreen: (screen: Screen) => void }) {
       bullets: [
         tx("“{applied}” moves the job to {applied} and into your stats.", { applied: t("Applied") }),
         tx("“{later}” sets it aside in the “{later}” tab; press it again to bring the job back.", { later: t("Later") }),
-        tx("“{hide}” takes it out of the feed. It waits in the “{hidden}” tab, where “{restore}” brings it back.", {
+        tx("“{hide}” takes it out of the feed into the “{hidden}” tab, where “{restore}” brings it back. Opening a card hides nothing by itself.", {
           hide: t("Hide"),
           hidden: t("Hidden jobs"),
           restore: t("Return to the list"),
-        }),
-        tx("“{mark}” under the buttons marks the job as viewed: it moves from “{new}” to “{viewed}”. Opening a card marks nothing by itself.", {
-          mark: t("Mark"),
-          new: t("New"),
-          viewed: t("Viewed"),
         }),
       ],
       illo: <FeedIllo />,

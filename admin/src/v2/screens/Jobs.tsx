@@ -10,14 +10,14 @@ import { JobPanel, inPipeline } from "../JobPanel"
 import { Empty, Icon, Score, Skeletons, ago, flagLabels, repostLabel } from "../ui"
 
 /** Each tab is a preset of filters the API already has. */
-type Tab = "new" | "later" | "viewed" | "all" | "hidden"
+type Tab = "new" | "later" | "hidden" | "all"
 
+/** "Hidden" is the viewed mark of the current admin: "Hide" sets it, nothing in the data changes. */
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "new", label: "New" },
   { id: "later", label: "Later" },
-  { id: "viewed", label: "Viewed" },
-  { id: "all", label: "All" },
   { id: "hidden", label: "Hidden jobs" },
+  { id: "all", label: "All" },
 ]
 
 type Prefs = {
@@ -37,7 +37,9 @@ const SORTS: JobSort[] = ["score", "added", "posted", "updated"]
 function revivePrefs(raw: unknown): Prefs | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
   const stored = raw as Record<string, unknown>
-  const tab = TABS.some((item) => item.id === stored.tab) ? (stored.tab as Tab) : "new"
+  // The tab that used to be called "viewed" is now "hidden".
+  const saved = stored.tab === "viewed" ? "hidden" : stored.tab
+  const tab = TABS.some((item) => item.id === saved) ? (saved as Tab) : "new"
   return {
     tab,
     min_score: typeof stored.min_score === "number" ? stored.min_score : 50,
@@ -54,12 +56,12 @@ function toFilters(prefs: Prefs, company: { key: string } | null): JobFilters {
       ? { applied: "no", later: "no", viewed: "no" }
       : prefs.tab === "later"
         ? { later: "yes" }
-        : prefs.tab === "viewed"
+        : prefs.tab === "hidden"
           ? { viewed: "yes" }
           : {}
   return {
     ...marks,
-    status: prefs.tab === "hidden" ? "ignored" : prefs.scope || undefined,
+    status: prefs.scope || undefined,
     min_score: company ? 0 : prefs.min_score,
     added_days: prefs.added_days,
     tier: prefs.tier,
@@ -69,13 +71,12 @@ function toFilters(prefs: Prefs, company: { key: string } | null): JobFilters {
   }
 }
 
-/** Whether a job still belongs on the open tab after an edit. Viewing alone never moves it. */
+/** Whether a job still belongs on the open tab after an edit. */
 function fitsTab(job: Job, tab: Tab): boolean {
-  if (tab === "hidden") return job.status === "ignored"
   if (job.status === "ignored") return false
-  if (tab === "new") return !job.later_at && !inPipeline(job)
+  if (tab === "new") return !job.viewed_at && !job.later_at && !inPipeline(job)
   if (tab === "later") return Boolean(job.later_at)
-  if (tab === "viewed") return Boolean(job.viewed_at)
+  if (tab === "hidden") return Boolean(job.viewed_at)
   return true
 }
 
@@ -161,8 +162,8 @@ export function Jobs() {
       setSelectedId(job.id)
       if (explicit) setShowDetail(true)
       await fetchDetail(job.id)
-      // Opening a card never marks it viewed: flipping through the list is not a decision,
-      // and "viewed" drops the job out of New here and in the current admin.
+      // Opening a card never hides it: flipping through the list is not a decision,
+      // and the viewed mark behind "Hide" drops the job out of New here and in the current admin.
     },
     [fetchDetail],
   )

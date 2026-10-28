@@ -739,8 +739,12 @@ export function JobPanel({
                     <button type="button" className="btn" onClick={() => handlers.onStatus("new")}>
                       {t("Return to the list")}
                     </button>
+                  ) : job.viewed_at ? (
+                    <button type="button" className="btn" onClick={handlers.onToggleViewed}>
+                      {t("Return to the list")}
+                    </button>
                   ) : (
-                    <button type="button" className="btn" onClick={() => handlers.onStatus("ignored")}>
+                    <button type="button" className="btn" onClick={handlers.onToggleViewed}>
                       <Icon name="x" size={15} />
                       {t("Hide")}
                     </button>
@@ -751,13 +755,6 @@ export function JobPanel({
                       {t("Open CV")}
                     </a>
                   ) : null}
-                </div>
-                <div className="muted" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                  <Icon name="eye" size={14} />
-                  {job.viewed_at ? t("Marked as viewed") : t("Not viewed")}
-                  <button type="button" className="btn-link" style={{ fontSize: 12 }} onClick={handlers.onToggleViewed}>
-                    {job.viewed_at ? t("Clear") : t("Mark")}
-                  </button>
                 </div>
               </div>
             )}
