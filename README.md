@@ -10,17 +10,31 @@ Built end to end by [Leonid Kurdyukov](https://github.com/Levanidd): product sco
 
 ## Screens
 
+Today. The last run and the next auto-run, where the pipeline stands, the best new postings and the next interview rounds.
+
+![Today: run status, counters, best new jobs and upcoming interviews](docs/screenshots/today.jpg)
+
+Jobs. The list and the open posting side by side. The AI column keeps the model's score, its reasons and Claude's notes apart from the posting text.
+
+![Jobs: list with scores and the open posting with its AI assessment](docs/screenshots/jobs.jpg)
+
+Stats. One person's funnel, the outcome of applications, and applications by week and month.
+
+![Stats: funnel, outcomes and applications by week and month](docs/screenshots/stats.jpg)
+
 Sources. A careers link is checked for an ATS the adapter can actually fetch. The table is the shared list of boards.
 
-![Sources: add a company and the watchlist](docs/screenshots/sources.jpg)
+![Resources: add a company and the shared list of sources](docs/screenshots/sources.jpg)
 
 Lab. A run replays postings the current scorer already judged, across several models and several repeats. Production scores stay as they are.
 
 ![Model lab: two finished runs](docs/screenshots/lab.jpg)
 
-One run. Stability, disagreement with the current score, latency and cost, then the matrix of repeats.
+One run. Disagreement with the current score, stability, latency and cost per model, then the matrix of repeats.
 
-![Lab run: five models on the same ten postings](docs/screenshots/lab-run.jpg)
+![Lab run: four models on the same eight postings](docs/screenshots/lab-run.jpg)
+
+The screenshots use sample data, not a real pipeline.
 
 ## The problem
 
@@ -81,7 +95,7 @@ Sign-in is a personal token. The first login with `ADMIN_TOKEN`, while `users` i
 
 - **Cloudflare Workers + Hono.** `src/index.ts` only mounts routes, checks the token and catches errors. Domain code lives in `src/routes/`. The same Worker serves `admin/dist` through the assets binding; a static file wins when it exists, so `/api/*` still hits the Worker.
 - **D1** (`job-scout`). Migrations in `migrations/` are applied by hand. They are not part of a code deploy.
-- **React + Vite** admin. Tabs: Resources (Discovery, Explore, Sources), Jobs, Applied, Stats, Profile, Settings (master), Lab (master), Guide.
+- **React + Vite** admin, two interfaces on the same API. The redesign at `/v2/` is the default: Today, Jobs, Applied, Profile, Stats, Guide, and for the master Resources (Sources, Found companies, Board overview), Settings and Lab. The previous admin stays at `/?classic`.
 - **Scoring:** Google Gemini or Nebius Token Factory (OpenAI-compatible). The master picks the provider, model and thinking level in Settings. Every model call is logged (tokens, timing) and shown under Settings → Model requests.
 - **Cron** resumes a stalled cycle and starts a run when a slot of the master's Europe/Berlin schedule is due.
 
