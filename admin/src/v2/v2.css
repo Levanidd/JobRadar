@@ -859,18 +859,67 @@ button:disabled {
   background: var(--card);
 }
 
+.panel-card {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The posting on the left, the model's view in a column of its own on the right.
+   Narrow panes wrap the column under the posting. */
+.panel-split {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
 .panel {
+  flex: 999 1 420px;
+  min-width: 0;
   padding: 24px 28px 40px;
   display: flex;
   flex-direction: column;
   gap: 22px;
-  max-width: 780px;
 }
 
-.panel-head {
+.panel-head-block {
   display: flex;
-  gap: 18px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-ai {
+  flex: 1 1 280px;
+  min-width: 0;
+  padding: 24px 22px 32px;
+  background: var(--card-2);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Same height and gap as the company row on the left, so the score sits level with the title. */
+.ai-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 24px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--violet-tx);
+}
+
+.ai-label {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx-2);
 }
 
 .panel-meta {
@@ -1506,6 +1555,12 @@ button:disabled {
   }
 
   .panel {
+    padding: 20px 16px 32px;
+  }
+
+  .panel-ai {
+    border-left: 0;
+    border-top: 1px solid var(--line);
     padding: 20px 16px 32px;
   }
 

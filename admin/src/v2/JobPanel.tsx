@@ -479,7 +479,7 @@ export function JobPanel({
   }
 
   return (
-    <article aria-label={job.title}>
+    <article aria-label={job.title} className="panel-card">
       <div className="panel-bar">
         <button type="button" className="icon-btn detail-back" aria-label={t("Back to the list")} onClick={onBack}>
           <Icon name="back" size={15} />
@@ -499,27 +499,15 @@ export function JobPanel({
             {position}
           </span>
         ) : null}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label={t("Rescore")}
-            title={t("Rescore")}
-            disabled={scoring}
-            onClick={handlers.onRescore}
-          >
-            <Icon name="refresh" size={15} />
-          </button>
-          <a className="btn btn-sm" href={job.url} target="_blank" rel="noreferrer">
-            {t("Open the posting")}
-            <Icon name="external" size={13} />
-          </a>
-        </div>
+        <a className="btn btn-sm" style={{ marginLeft: "auto" }} href={job.url} target="_blank" rel="noreferrer">
+          {t("Open the posting")}
+          <Icon name="external" size={13} />
+        </a>
       </div>
 
-      <div className="panel">
-        <header className="panel-head">
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="panel-split">
+        <div className="panel">
+          <header className="panel-head-block">
             <div className="panel-meta">
               <CompanyMark name={job.company} small />
               {handlers.onOpenCompany ? (
@@ -545,9 +533,10 @@ export function JobPanel({
                 {job.title}
               </a>
             </h2>
-            {job.location || pay ? <div className="muted">{[job.location, pay].filter(Boolean).join(" · ")}</div> : null}
-            <div className="faint" style={{ fontSize: 12 }}>
+            <div className="muted">
               {[
+                job.location,
+                pay,
                 job.posted_at ? t("Posted {date}", { date: shortDate(job.posted_at) }) : null,
                 t("added {date}", { date: shortDate(job.first_seen_at) }),
                 t("updated {date}", { date: shortDate(job.changed_at ?? job.first_seen_at) }),
@@ -555,118 +544,153 @@ export function JobPanel({
                 .filter(Boolean)
                 .join(" · ")}
             </div>
-          </div>
-          <Score job={job} large />
-        </header>
 
-        {reason ? <p className="prose muted">{reason}</p> : null}
+            {pipeline ? (
+              <div className="actions" style={{ marginTop: 6 }}>
+                <span className="chip chip-amber" style={{ height: 34, padding: "0 12px", borderRadius: 10, fontSize: 13 }}>
+                  <Icon name="check" size={14} />
+                  {job.applied_at ? t("Applied {date}", { date: shortDate(job.applied_at) }) : t("Applied")}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-green"
+                  aria-pressed={interview}
+                  onClick={() => handlers.onStatus(interview ? "applied" : "interview")}
+                >
+                  {t("Interview")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-red"
+                  aria-pressed={rejected}
+                  onClick={() => handlers.onStatus(rejected ? beforeRejection : "rejected")}
+                >
+                  {t("Rejected")}
+                </button>
+                {job.cv_url ? (
+                  <a className="btn btn-sm btn-ghost" href={job.cv_url} target="_blank" rel="noreferrer">
+                    <Icon name="file" size={15} />
+                    {t("Open CV")}
+                  </a>
+                ) : null}
+                <button type="button" className="btn-link" style={{ marginLeft: "auto" }} onClick={clearApplied}>
+                  {t("Clear the applied mark")}
+                </button>
+              </div>
+            ) : (
+              <div className="section" style={{ gap: 10, marginTop: 6 }}>
+                <div className="actions">
+                  <button type="button" className="btn btn-primary" onClick={() => handlers.onStatus("applied")}>
+                    {t("Applied")}
+                  </button>
+                  <button type="button" className="btn" aria-pressed={Boolean(job.later_at)} onClick={handlers.onToggleLater}>
+                    <Icon name="clock" size={15} />
+                    {t("Later")}
+                  </button>
+                  {job.status === "ignored" ? (
+                    <button type="button" className="btn" onClick={() => handlers.onStatus("new")}>
+                      {t("Return to the list")}
+                    </button>
+                  ) : (
+                    <button type="button" className="btn" onClick={() => handlers.onStatus("ignored")}>
+                      <Icon name="x" size={15} />
+                      {t("Hide")}
+                    </button>
+                  )}
+                  {job.cv_url ? (
+                    <a className="btn btn-ghost" href={job.cv_url} target="_blank" rel="noreferrer">
+                      <Icon name="file" size={15} />
+                      {t("Open CV")}
+                    </a>
+                  ) : null}
+                </div>
+                <div className="muted" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                  <Icon name="eye" size={14} />
+                  {job.viewed_at ? t("Marked as viewed") : t("Not viewed")}
+                  <button type="button" className="btn-link" style={{ fontSize: 12 }} onClick={handlers.onToggleViewed}>
+                    {job.viewed_at ? t("Clear") : t("Mark")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </header>
 
-        {flags.length || repost ? (
-          <div className="actions" style={{ gap: 6 }}>
-            {flags.map((flag) => (
-              <span key={flag} className="chip chip-red">
-                {flag}
-              </span>
-            ))}
-            {repost ? (
-              <button type="button" className="chip chip-amber" onClick={() => handlers.onOpenJob(repost.id)}>
-                {repost.label}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+          {interview || job.interviewed_at ? <Stages job={job} onPatch={handlers.onPatch} /> : null}
+          <Notes job={job} onSaved={(notes) => handlers.onPatch({ notes })} />
+          <Description job={job} />
+          <Duplicates job={job} onJob={handlers.onJob} />
+        </div>
 
-        {pipeline ? (
-          <div className="actions">
-            <span className="chip chip-amber" style={{ height: 36, padding: "0 12px", borderRadius: 10, fontSize: 13 }}>
-              <Icon name="check" size={14} />
-              {job.applied_at ? t("Applied {date}", { date: shortDate(job.applied_at) }) : t("Applied")}
-            </span>
-            <button
-              type="button"
-              className="btn btn-sm btn-green"
-              aria-pressed={interview}
-              onClick={() => handlers.onStatus(interview ? "applied" : "interview")}
-            >
-              {t("Interview")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-red"
-              aria-pressed={rejected}
-              onClick={() => handlers.onStatus(rejected ? beforeRejection : "rejected")}
-            >
-              {t("Rejected")}
-            </button>
-            {job.cv_url ? (
-              <a className="btn btn-sm btn-ghost" href={job.cv_url} target="_blank" rel="noreferrer">
-                <Icon name="file" size={15} />
-                {t("Open CV")}
-              </a>
-            ) : null}
-            <button type="button" className="btn-link" style={{ marginLeft: "auto" }} onClick={clearApplied}>
-              {t("Clear the applied mark")}
-            </button>
-          </div>
-        ) : (
+        {/* The model's view sits in its own column, so it never reads as part of the posting. */}
+        <aside className="panel-ai" aria-label={t("AI assessment")}>
           <div className="section" style={{ gap: 10 }}>
-            <div className="actions">
-              <button type="button" className="btn btn-primary" onClick={() => handlers.onStatus("applied")}>
-                {t("Applied")}
+            <div className="ai-eyebrow">
+              <span>{t("AI ASSESSMENT")}</span>
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ marginLeft: "auto", width: 26, height: 26, borderRadius: 8 }}
+                aria-label={t("Rescore")}
+                title={t("Rescore")}
+                disabled={scoring}
+                onClick={handlers.onRescore}
+              >
+                <Icon name="refresh" size={13} />
               </button>
-              <button type="button" className="btn" aria-pressed={Boolean(job.later_at)} onClick={handlers.onToggleLater}>
-                <Icon name="clock" size={15} />
-                {t("Later")}
-              </button>
-              {job.status === "ignored" ? (
-                <button type="button" className="btn" onClick={() => handlers.onStatus("new")}>
-                  {t("Return to the list")}
-                </button>
-              ) : (
-                <button type="button" className="btn" onClick={() => handlers.onStatus("ignored")}>
-                  <Icon name="x" size={15} />
-                  {t("Hide")}
-                </button>
-              )}
-              {job.cv_url ? (
-                <a className="btn btn-ghost" href={job.cv_url} target="_blank" rel="noreferrer">
-                  <Icon name="file" size={15} />
-                  {t("Open CV")}
-                </a>
-              ) : null}
             </div>
-            <div className="muted" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-              <Icon name="eye" size={14} />
-              {job.viewed_at ? t("Marked as viewed") : t("Not viewed")}
-              <button type="button" className="btn-link" style={{ fontSize: 12 }} onClick={handlers.onToggleViewed}>
-                {job.viewed_at ? t("Clear") : t("Mark")}
-              </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <Score job={job} large />
+              <span className="muted" style={{ fontSize: 13 }}>
+                {t("Score against the profile")}
+                <br />
+                {t("out of 100")}
+              </span>
             </div>
           </div>
-        )}
 
-        {interview || job.interviewed_at ? <Stages job={job} onPatch={handlers.onPatch} /> : null}
+          <section className="section" style={{ gap: 6 }}>
+            <h3 className="ai-label">{t("Why this score")}</h3>
+            {reason ? <p className="prose">{reason}</p> : <p className="prose faint">{t("Not scored yet")}</p>}
+          </section>
 
-        <Notes job={job} onSaved={(notes) => handlers.onPatch({ notes })} />
+          <section className="section" style={{ gap: 6 }}>
+            <h3 className="ai-label">{t("Flags")}</h3>
+            {flags.length || repost ? (
+              <div className="actions" style={{ gap: 6 }}>
+                {flags.map((flag) => (
+                  <span key={flag} className="chip chip-red">
+                    {flag}
+                  </span>
+                ))}
+                {repost ? (
+                  <button type="button" className="chip chip-amber" onClick={() => handlers.onOpenJob(repost.id)}>
+                    {repost.label}
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <p className="prose faint" style={{ fontSize: 13 }}>
+                {t("None")}
+              </p>
+            )}
+          </section>
 
-        <section className="section">
-          <h3 className="section-title">
-            <span style={{ color: "var(--acc)", display: "inline-flex" }}>
-              <Icon name="sparkle" size={15} />
-            </span>
-            {t("Claude's comment")}
-          </h3>
-          {job.claude_comment ? (
-            <p className="prose" style={{ whiteSpace: "pre-line" }}>
-              {job.claude_comment}
-            </p>
-          ) : (
-            <p className="prose faint">{t("Nothing yet")}</p>
-          )}
-        </section>
-
-        <Description job={job} />
-        <Duplicates job={job} onJob={handlers.onJob} />
+          <section className="section section-ruled" style={{ gap: 6 }}>
+            <h3 className="ai-label">
+              <span style={{ color: "var(--acc)", display: "inline-flex" }}>
+                <Icon name="sparkle" size={13} />
+              </span>
+              {t("Claude's comment")}
+            </h3>
+            {job.claude_comment ? (
+              <p className="prose" style={{ whiteSpace: "pre-line" }}>
+                {job.claude_comment}
+              </p>
+            ) : (
+              <p className="prose faint">{t("Nothing yet")}</p>
+            )}
+          </section>
+        </aside>
       </div>
     </article>
   )
