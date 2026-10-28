@@ -8,6 +8,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    // shared/ sits next to the admin, one level up, and is imported by both sides.
+    fs: { allow: [".."] },
     proxy: {
       "/api": "http://127.0.0.1:43142",
     },

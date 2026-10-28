@@ -1,11 +1,11 @@
-export type Band = "0-39" | "40-69" | "70-100"
-export type Stratum = Band | "labeled"
-export type SampleMode = "random" | "stratified"
+import type { Band, JobStatus, SampleMode, Stratum } from "../../shared/domain"
+
+export type { Band, SampleMode, Stratum } from "../../shared/domain"
 
 export const BANDS: Band[] = ["0-39", "40-69", "70-100"]
 
 /** Statuses a person set by hand: the only postings with a real decision behind them. */
-export const LABELED_STATUSES = ["applied", "interview", "saved", "rejected"]
+export const LABELED_STATUSES: string[] = ["applied", "interview", "saved", "rejected"] satisfies JobStatus[]
 const LABELED_SHARE = 0.3
 
 export type PoolEntry = { job_id: string; score: number; status: string }

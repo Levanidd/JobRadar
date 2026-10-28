@@ -1,24 +1,23 @@
-export type AuthUser = {
-  id: number
-  name: string
-  role: "master" | "user"
-}
+import type { ScoringProvider, ThinkingLevel } from "../../shared/domain"
+import type { CyclePhase, CycleStatus, JobStatus, LabStatus, LabTrialStatus } from "../../shared/domain"
+import type { SampleMode as LabSampleMode, Stratum as LabStratum } from "../../shared/domain"
 
-/** Master-only view: `token` is null for a master who still logs in with ADMIN_TOKEN. */
-export type ManagedUser = AuthUser & { token: string | null }
+/** Shared with the Worker: see shared/domain.ts. */
+export type {
+  AuthUser,
+  CyclePhase,
+  CycleStatus,
+  JobStatus,
+  LabStatus,
+  LabTrialStatus,
+  ManagedUser,
+  ModelOption,
+  ScoringProvider,
+  ThinkingLevel,
+} from "../../shared/domain"
+export type { SampleMode as LabSampleMode, Stratum as LabStratum } from "../../shared/domain"
 
 export type Tier = "watchlist" | "discovery"
-
-export type JobStatus =
-  | "new"
-  | "notified"
-  | "saved"
-  | "applied"
-  | "interview"
-  | "rejected"
-  | "ignored"
-  /** Title did not match the prefilter, so it was never scored. */
-  | "off_profile"
 
 export type Job = {
   id: string
@@ -138,13 +137,6 @@ export type DetectResult = {
   error?: string
 }
 
-export type ThinkingLevel = "LOW" | "MEDIUM" | "HIGH"
-
-/** Prices are dollars per million tokens; only Nebius publishes them. */
-export type ModelOption = { id: string; label: string; price_in_per_m?: number; price_out_per_m?: number }
-
-export type ScoringProvider = "gemini" | "nebius"
-
 export type ModelSource = "database" | "secret" | "default"
 
 export type ProviderSettings = {
@@ -208,10 +200,6 @@ export type RunResult = {
   duration_ms: number
   suspicious: number
 }
-
-export type CycleStatus = "idle" | "running" | "done" | "error"
-
-export type CyclePhase = "sources" | "scoring" | "digest"
 
 export type Cycle = {
   status: CycleStatus
@@ -308,12 +296,6 @@ export type CycleRunLog = {
 
 // ---------- model lab ----------
 
-export type LabStatus = "queued" | "running" | "done" | "error" | "cancelled"
-
-export type LabStratum = "0-39" | "40-69" | "70-100" | "labeled"
-
-export type LabSampleMode = "stratified" | "random"
-
 export type LabRun = {
   id: number
   name: string
@@ -382,8 +364,6 @@ export type LabJob = {
   baseline_flags: string | null
   baseline_status: JobStatus | null
 }
-
-export type LabTrialStatus = "pending" | "running" | "ok" | "failed" | "cancelled"
 
 export type LabTrial = {
   id: number

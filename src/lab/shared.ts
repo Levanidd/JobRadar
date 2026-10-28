@@ -2,6 +2,7 @@ import { pick } from "../locale"
 import type { LabCell, LabSummary } from "./metrics"
 import type { SampleMode, Stratum } from "./sample"
 import type { ScoringErrorCode, ScoringProvider, ThinkingLevel } from "../scoring"
+import type { JobStatus, LabStatus, LabTrialStatus } from "../../shared/domain"
 import type { Bindings } from "../types"
 
 export const LAB_CONCURRENCY = 4
@@ -36,11 +37,11 @@ export const RETRYABLE: ScoringErrorCode[] = ["http_429", "http_5xx", "timeout"]
  * Listed rather than `<> 'off_profile'` so the (user_id, status, score) index
  * seeks past the parked rows instead of reading every one of them.
  */
-export const POOL_STATUSES = ["new", "notified", "saved", "applied", "interview", "rejected", "ignored"]
+export const POOL_STATUSES: string[] = ["new", "notified", "saved", "applied", "interview", "rejected", "ignored"] satisfies JobStatus[]
 
 export const emptyPool = () => pick("No scored postings for this profile", "Нет оценённых вакансий для этого профиля")
 
-export type LabStatus = "queued" | "running" | "done" | "error" | "cancelled"
+export type { LabStatus } from "../../shared/domain"
 
 export type LabRunRow = {
   id: number
@@ -125,7 +126,7 @@ export type LabTrial = {
   job_id: string
   repeat_no: number
   exec_order: number
-  status: "pending" | "running" | "ok" | "failed" | "cancelled"
+  status: LabTrialStatus
   score: number | null
   reason: string | null
   flags: string | null
