@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            admin/package-lock.json
+      - run: npm ci
+      - run: npm --prefix admin ci
+      # Typecheck of the Worker and the admin, then the tests against real migrations.
+      - run: npm test
+      - run: npm --prefix admin run build
+      # Bundles the Worker the way Workers Builds would, without deploying it.
+      - run: npx wrangler deploy --dry-run --outdir .wrangler-dry-run
