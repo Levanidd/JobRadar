@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { api, type JobFilters, type JobSort } from "../../api"
 import { useAction, useApp, useLoader } from "../../app-context"
@@ -139,17 +139,32 @@ export function Jobs() {
   const listed = selectedIndex >= 0 && jobs ? jobs[selectedIndex] : null
   const current = detail && detail.id === selectedId ? detail : listed
 
+  // The list row lacks the description, stages and duplicates; the card fetches the full job.
+  const requested = useRef<string | null>(null)
+  const fetchDetail = useCallback(
+    async (id: string) => {
+      requested.current = id
+      setDetail(null)
+      const result = await run(() => api.job(id))
+      if (result && requested.current === id) setDetail(result.job)
+    },
+    [run],
+  )
+
+  // Covers the job picked without a click: the first one after the list loads.
+  useEffect(() => {
+    if (selectedId && requested.current !== selectedId) void fetchDetail(selectedId)
+  }, [selectedId, fetchDetail])
+
   const open = useCallback(
     async (job: Job, explicit: boolean) => {
       setSelectedId(job.id)
-      setDetail(null)
       if (explicit) setShowDetail(true)
-      const result = await run(() => api.job(job.id))
-      if (result) setDetail((prev) => (prev && prev.id !== job.id ? prev : result.job))
+      await fetchDetail(job.id)
       // Opening a card never marks it viewed: flipping through the list is not a decision,
       // and "viewed" drops the job out of New here and in the current admin.
     },
-    [run],
+    [fetchDetail],
   )
 
   /** Applies an edit to the list and the card; `move` drops a row that no longer fits the tab. */
@@ -231,6 +246,7 @@ export function Jobs() {
   async function openById(id: string) {
     const result = await run(() => api.job(id))
     if (!result) return
+    requested.current = result.job.id
     setSelectedId(result.job.id)
     setDetail(result.job)
     setShowDetail(true)
