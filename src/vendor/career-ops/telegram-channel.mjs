@@ -15,7 +15,7 @@
 // `company` is that employer, `url` is that link (the dedup key, checkable by
 // liveness), and the t.me permalink travels in `description` as `Source:`.
 // Posts that name no employer, link only to Telegram/social/footer hosts,
-// hide the employer (the matcher includes the Russian "name hidden" phrasing, and "our client"), or bundle several
+// hide the employer ("название скрыто", "our client"), or bundle several
 // vacancies are not emitted. Measured 2026-09-03 over 809 posts from 17
 // public channels, before hashtag-template support: 137 pass (25% of the
 // RU/CIS corpus, none of the EN one, whose channels mirror boards career-ops

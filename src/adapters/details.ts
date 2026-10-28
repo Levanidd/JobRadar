@@ -1,13 +1,15 @@
+import { fetchRemoteDescription, remoteDetailUrl } from "./remote"
 import { fetchWorkdayDescription, workdayDetailUrl } from "./workday"
 import { fetchZalandoDescription, zalandoDetailUrl } from "./zalando"
 
 /**
- * Boards whose listing carries no posting body. The text costs one more
- * request per posting, so it is fetched only for jobs about to be scored.
+ * Boards whose listing carries no posting body (or only a teaser). The text
+ * costs one more request per posting, so it is fetched only for jobs about to be scored.
  */
 const LATE_BODY = [
   { matches: workdayDetailUrl, fetch: fetchWorkdayDescription },
   { matches: zalandoDetailUrl, fetch: fetchZalandoDescription },
+  { matches: remoteDetailUrl, fetch: fetchRemoteDescription },
 ]
 
 export function bodyComesLater(jobUrl: string): boolean {

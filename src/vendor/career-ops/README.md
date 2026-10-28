@@ -23,6 +23,8 @@ free, we map it. Every such edit is marked `job-scout patch` in place.
 | `landingjobs.mjs` | Keep `gross_salary_low`/`gross_salary_high` as yearly EUR. |
 | `_http.mjs` | Trimmed to the retry policy; see below. |
 | `getro.mjs` | Send `entry.getro_query` as the search phrase instead of always `''`. |
+| `oraclecloud.mjs` | Keep every office: `secondaryLocations` joined with the primary. |
+| `workday.mjs` | Keep `additionalLocations` and `secondaryLocations` next to `locationsText`. |
 
 `_http.mjs` upstream also holds the low-level transport, which binds to
 `node:dns`, an IP guard and `Buffer` — none of which exist on Workers. Only

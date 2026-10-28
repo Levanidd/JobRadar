@@ -19,6 +19,7 @@ import { parseWorkable } from "../../src/adapters/workable"
 import { parseAdzuna } from "../../src/adapters/adzuna"
 import { amazonCategorySlug, amazonToken, parseAmazon } from "../../src/adapters/amazon"
 import { readWorkdayDescription, workdayDetailUrl } from "../../src/adapters/workday"
+import { parseRemote, readRemoteDescription, remoteDetailUrl } from "../../src/adapters/remote"
 import { parseZalandoPage, readZalandoDescription, zalandoDetailUrl } from "../../src/adapters/zalando"
 import { bodyComesLater } from "../../src/adapters/details"
 import { getroBoard } from "../../src/adapters/getro"
@@ -678,5 +679,68 @@ describe("zalando", () => {
     expect(zalandoDetailUrl("https://jobs.zalando.com/en/jobs")).toBeNull()
     expect(bodyComesLater("https://jobs.zalando.com/en/jobs/2724849")).toBe(true)
     expect(bodyComesLater("https://boards.greenhouse.io/acme/jobs/1")).toBe(false)
+  })
+})
+
+describe("remote", () => {
+  const id = "9178a8fb-451f-4dde-a040-074d8d139201"
+
+  it("keeps open roles and the first pay band", () => {
+    const jobs = parseRemote({
+      jobs: [
+        {
+          status: "open",
+          accepting_applications: true,
+          public_id: id,
+          title: "Associate Account Manager",
+          location: "NORAM",
+          description: ".",
+          opened_at: "2026-10-28T15:28:08Z",
+          pay: { rows: [{ min: 128750, max: 144850, currency: "USD" }] },
+        },
+        { status: "closed", accepting_applications: true, public_id: "closed", title: "Old role" },
+        { status: "open", accepting_applications: false, public_id: "paused", title: "Paused role" },
+      ],
+    })
+    expect(jobs).toEqual([
+      {
+        externalId: id,
+        title: "Associate Account Manager",
+        company: "Remote",
+        location: "NORAM",
+        url: `https://apply.remote.com/jobs/${id}`,
+        postedAt: "2026-10-28T15:28:08.000Z",
+        salary: { min: 128750, max: 144850, currency: "USD" },
+      },
+    ])
+  })
+
+  it("reads the advert and skips the company boilerplate", () => {
+    const text = readRemoteDescription({
+      job: {
+        advert_sections: [
+          { heading: "About Remote", doc: { type: "paragraph", content: [{ text: "We hire globally." }] } },
+          {
+            heading: "Job Description",
+            doc: {
+              type: "doc",
+              content: [
+                { type: "heading", content: [{ text: "Key responsibilities" }] },
+                { type: "bulleted", content: [{ text: "Own payroll outcomes." }] },
+              ],
+            },
+          },
+          { key: "conclusion", heading: "Conclusion", doc: { content: [{ text: "Apply now." }] } },
+        ],
+      },
+    })
+    expect(text).toBe("Job Description Key responsibilities - Own payroll outcomes.")
+    expect(remoteDetailUrl(`https://apply.remote.com/jobs/${id}`)).toBe(
+      `https://apply.remote.com/api/public/jobs/${id}`,
+    )
+    expect(remoteDetailUrl("https://apply.remote.com/")).toBeNull()
+    expect(bodyComesLater(`https://apply.remote.com/jobs/${id}`)).toBe(true)
+    expect(detectToken(new URL("https://apply.remote.com/"))).toEqual({ provider: "remote", token: "remote" })
+    expect(detectToken(new URL("https://remote.com/openings"))).toEqual({ provider: "remote", token: "remote" })
   })
 })

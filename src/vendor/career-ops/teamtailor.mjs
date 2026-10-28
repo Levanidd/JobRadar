@@ -1,5 +1,5 @@
-import { decodeEntities } from './_html-entities.mjs';
 // @ts-check
+import { decodeEntities } from './_html-entities.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Teamtailor provider — per-tenant public RSS feed.
@@ -128,21 +128,13 @@ function cleanUrl(value) {
   }
 }
 
-// Every <location> block, city then country, in feed order. Repeats dropped.
-// Falls back to "Remote" when the posting carries no place but is flagged remote.
+// Build a human location from the first <tt:location> (city, country). Falls
+// back to "Remote" when the posting carries no place but is flagged remote.
 function resolveLocation(item) {
-  const blocks = item.match(/<location\b[^>]*>[\s\S]*?<\/location>/gi) || [item];
-  const seen = new Set();
-  const ordered = [];
-  for (const block of blocks) {
-    const place = [tagText(block, 'tt:city'), tagText(block, 'tt:country')].filter(Boolean).join(', ');
-    if (!place) continue;
-    const key = place.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    ordered.push(place);
-  }
-  if (ordered.length) return ordered.join('; ');
+  const city = tagText(item, 'tt:city');
+  const country = tagText(item, 'tt:country');
+  const place = [city, country].filter(Boolean).join(', ');
+  if (place) return place;
   const remote = tagText(item, 'remoteStatus').toLowerCase();
   return remote === 'fully' || remote === 'temporary' ? 'Remote' : '';
 }

@@ -49,6 +49,7 @@ import { radancy } from "./radancy"
 import { recruitee } from "./recruitee"
 import { remoteok } from "./remoteok"
 import { remotli } from "./remotli"
+import { remote } from "./remote"
 import { remotive } from "./remotive"
 import { rheinmetall } from "./rheinmetall"
 import { rippling } from "./rippling"
@@ -108,6 +109,7 @@ export const adapters: Adapter[] = [
   ibm,
   dassault,
   zalando,
+  remote,
   arbeitsagentur,
   amazon,
   arbeitnow,

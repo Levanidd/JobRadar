@@ -122,7 +122,7 @@ async function profileContent(env: Bindings, userId: number): Promise<string> {
 const DETAIL_CONCURRENCY = 6
 
 /**
- * Some boards (Workday, Zalando) list postings without a body. Pull it before
+ * Some boards (Workday, Zalando, Remote) list postings without a body. Pull it before
  * the model runs and keep it, so the card and a later rescore don't fetch it again.
  */
 async function fillLateDescriptions(

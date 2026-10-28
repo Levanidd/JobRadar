@@ -25,6 +25,7 @@ const ATS_PROVIDERS = new Set([
   "gem",
   "join",
   "zalando",
+  "remote",
   "amazon",
   "ibm",
   "dassault",

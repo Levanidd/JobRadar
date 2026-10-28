@@ -157,10 +157,8 @@ export function buildJobUrl(site, id) {
 }
 
 /**
- * Assemble a location string for a requisition. Prefers PrimaryLocation; else
- * builds from the expanded workLocation object; appends a remote/hybrid hint
- * from WorkplaceTypeCode. Returns "" when nothing is available.
- * @param {any} req
+ * One office, whether the feed sent a string or an expanded location object.
+ * @param {any} loc
  */
 function placeName(loc) {
   if (typeof loc === 'string') return loc.trim();
@@ -170,10 +168,19 @@ function placeName(loc) {
   return typeof loc.Name === 'string' ? loc.Name.trim() : '';
 }
 
+/**
+ * Assemble a location string for a requisition. Prefers PrimaryLocation; else
+ * builds from the expanded workLocation object; appends a remote/hybrid hint
+ * from WorkplaceTypeCode. Returns "" when nothing is available.
+ *
+ * job-scout patch: secondaryLocations are other offices of the same opening.
+ * Upstream keeps only the primary one.
+ * @param {any} req
+ */
 function assembleLocation(req) {
   const places = [];
   const push = (value) => {
-    const place = typeof value === 'string' ? value.trim() : placeName(value);
+    const place = placeName(value);
     if (!place) return;
     if (places.some((item) => item.toLowerCase() === place.toLowerCase())) return;
     places.push(place);
