@@ -352,7 +352,6 @@ export function Jobs() {
                 const pay = formatSalary(job.salary_min, job.salary_max, job.salary_currency)
                 const flags = flagLabels(job.flags)
                 const repost = repostLabel(job.flags)
-                const unread = !job.viewed_at
                 return (
                   <button
                     key={job.id}
@@ -361,10 +360,9 @@ export function Jobs() {
                     aria-current={job.id === selectedId}
                     onClick={() => void open(job, true)}
                   >
-                    <span className={`row-dot${unread ? " unread" : ""}`} aria-label={unread ? t("Not viewed") : undefined} />
                     <Score job={job} />
                     <span className="row-main">
-                      <span className={`row-title${unread ? " unread" : ""}`}>{job.title}</span>
+                      <span className="row-title">{job.title}</span>
                       <span className="row-sub">{[job.company, job.location, pay].filter(Boolean).join(" · ")}</span>
                       {flags.length || repost || job.later_at ? (
                         <span className="row-badges">

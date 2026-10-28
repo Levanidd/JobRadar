@@ -744,19 +744,6 @@ button:disabled {
   border-color: var(--violet-line);
 }
 
-.row-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin-top: 15px;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.row-dot.unread {
-  background: var(--acc);
-}
-
 .row .score {
   margin-top: 6px;
 }
@@ -775,10 +762,6 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.row-title.unread {
-  font-weight: 650;
 }
 
 .row-sub {
