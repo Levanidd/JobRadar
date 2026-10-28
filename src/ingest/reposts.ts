@@ -54,7 +54,8 @@ async function previousApplications(env: Bindings, userId: number, matchKey: str
          LIMIT 500`,
       ).all<LegacyApplication>()
       legacyHistory = loaded.results
-    } catch {
+    } catch (error) {
+      console.warn("applied_history unreadable, imported applications skipped for this isolate", error)
       legacyOff = true
       legacyHistory = []
       return found
