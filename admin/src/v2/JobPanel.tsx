@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 
 import { api } from "../api"
 import { useAction } from "../app-context"
@@ -6,6 +6,7 @@ import { formatSalary } from "../components/common"
 import { statusLabel } from "../components/job-status"
 import { useT } from "../i18n"
 import type { InterviewStage, Job, JobDuplicate, JobStatus } from "../types"
+import { parseClaudeComment, type CommentMessage, type CommentPart } from "./claude-comment"
 import { CompanyMark, Icon, Score, flagLabels, repostLabel, shortDate } from "./ui"
 
 export function inPipeline(job: Job): boolean {
@@ -451,6 +452,132 @@ function Linked({ text }: { text: string }) {
   )
 }
 
+/* ── Claude's comment as a timeline of messages, newest open ───────────── */
+
+const MESSAGE_LABELS: Record<string, string> = {
+  "auto-review": "Auto review",
+  review: "Review",
+  answers: "Form answers",
+  chat: "Chat",
+  update: "Update",
+}
+
+function chipTone(item: string): string {
+  const value = (item.includes(":") ? item.slice(item.indexOf(":") + 1) : item).trim().toLowerCase()
+  if (/^(подаваться|высок)/.test(value)) return "chip-green"
+  if (/^(пограничн|средн)/.test(value)) return "chip-amber"
+  if (/^(мимо|низк)/.test(value)) return "chip-red"
+  return "chip-gray"
+}
+
+function MessageParts({ parts }: { parts: CommentPart[] }) {
+  const t = useT()
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.kind === "chips")
+          return (
+            <div key={index} className="actions" style={{ gap: 6 }}>
+              {part.items.map((item) => (
+                <span key={item} className={`chip ${chipTone(item)}`}>
+                  {item}
+                </span>
+              ))}
+            </div>
+          )
+        if (part.kind === "field")
+          return (
+            <p key={index} className="prose">
+              <span className="ai-key">{part.key}:</span> <Linked text={part.text} />
+            </p>
+          )
+        if (part.kind === "qa")
+          return (
+            <div key={index} className="ai-qa">
+              <p className="ai-q">
+                <Linked text={part.question} />
+              </p>
+              {part.answers.map((answer, answerIndex) => {
+                const note = answer.label.replace(/^A\s*\(?/, "").replace(/\)$/, "")
+                return (
+                  <div key={answerIndex} className="section" style={{ gap: 2 }}>
+                    <span className="ai-key">{note ? `${t("Answer")} · ${note}` : t("Answer")}</span>
+                    <p className="prose" style={{ whiteSpace: "pre-line" }}>
+                      <Linked text={answer.text} />
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        return (
+          <p key={index} className="prose">
+            <Linked text={part.text} />
+          </p>
+        )
+      })}
+    </>
+  )
+}
+
+function messageTitle(message: CommentMessage, t: ReturnType<typeof useT>): string {
+  const known = MESSAGE_LABELS[message.label]
+  if (known) return t(known)
+  if (message.label) return message.label[0].toUpperCase() + message.label.slice(1)
+  return message.date ? t("Note") : t("Undated")
+}
+
+function ClaudeComment({ comment }: { comment: string }) {
+  const t = useT()
+  const messages = useMemo(() => parseClaudeComment(comment), [comment])
+  const [open, setOpen] = useState<Set<number>>(() => new Set([0]))
+
+  // An old comment with no headers at all is one message: no timeline around it.
+  if (messages.length === 1 && !messages[0].label && !messages[0].date)
+    return (
+      <div className="section" style={{ gap: 10 }}>
+        <MessageParts parts={messages[0].parts} />
+      </div>
+    )
+
+  function toggle(index: number) {
+    setOpen((current) => {
+      const next = new Set(current)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  return (
+    <ol className="ai-thread">
+      {messages.map((message, index) => {
+        const expanded = open.has(index)
+        return (
+          <li key={index} className={expanded ? "ai-msg open" : "ai-msg"}>
+            <span className="ai-msg-dot" aria-hidden="true" />
+            <button type="button" className="ai-msg-head" aria-expanded={expanded} onClick={() => toggle(index)}>
+              <span className="ai-msg-row">
+                <span className="ai-msg-title">
+                  {messageTitle(message, t)}
+                  {message.detail ? <span className="faint"> · {message.detail}</span> : null}
+                </span>
+                {message.date ? <span className="ai-msg-date">{shortDate(message.date)}</span> : null}
+              </span>
+              {expanded ? null : <span className="ai-msg-summary">{message.summary}</span>}
+            </button>
+            {expanded ? (
+              <div className="ai-msg-body">
+                <MessageParts parts={message.parts} />
+              </div>
+            ) : null}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
 /* ── The card ───────────────────────────────────────────────────────────── */
 
 export type PanelHandlers = {
@@ -703,10 +830,8 @@ export function JobPanel({
               </span>
               {t("Claude's comment")}
             </h3>
-            {job.claude_comment ? (
-              <p className="prose" style={{ whiteSpace: "pre-line" }}>
-                <Linked text={job.claude_comment} />
-              </p>
+            {job.claude_comment?.trim() ? (
+              <ClaudeComment key={job.id} comment={job.claude_comment} />
             ) : (
               <p className="prose faint">{t("Nothing yet")}</p>
             )}
