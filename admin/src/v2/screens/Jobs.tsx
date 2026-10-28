@@ -4,7 +4,7 @@ import { api, type JobFilters, type JobSort } from "../../api"
 import { useAction, useApp, useLoader } from "../../app-context"
 import { formatSalary } from "../../components/common"
 import { useT } from "../../i18n"
-import { usePersistentState } from "../../persist"
+import { mergeStored, usePersistentState } from "../../persist"
 import type { Job, JobStatus } from "../../types"
 import { JobPanel, inPipeline } from "../JobPanel"
 import { Empty, Icon, Score, Skeletons, ago, flagLabels, repostLabel } from "../ui"
@@ -31,6 +31,15 @@ type Prefs = {
 }
 
 const DEFAULT_PREFS: Prefs = { tab: "new", min_score: 50, scope: "", sort: "score" }
+
+const JOBS_PREFS_KEY = "v2.jobs"
+
+/** Jobs unmounts on the other screens, so a click elsewhere writes the tab
+ *  before the list mounts and reads its saved filters. Score, dates and the
+ *  rest stay as they were. */
+export function rememberJobsTab(tab: "new" | "later"): void {
+  mergeStored(JOBS_PREFS_KEY, { tab })
+}
 
 const SORTS: JobSort[] = ["score", "added", "posted", "updated"]
 
@@ -86,7 +95,7 @@ export function Jobs() {
   const t = useT()
   const run = useAction()
   const { notify } = useApp()
-  const [prefs, setPrefs] = usePersistentState<Prefs>("v2.jobs", DEFAULT_PREFS, revivePrefs)
+  const [prefs, setPrefs] = usePersistentState<Prefs>(JOBS_PREFS_KEY, DEFAULT_PREFS, revivePrefs)
   const [company, setCompany] = useState<{ key: string; name: string } | null>(null)
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [hasMore, setHasMore] = useState(false)

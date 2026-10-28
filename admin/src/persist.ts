@@ -20,6 +20,13 @@ function write(key: string, value: unknown): void {
   }
 }
 
+/** Patches a stored object before the screen that reads it is mounted. */
+export function mergeStored(key: string, patch: Record<string, unknown>): void {
+  const current = read(key)
+  const base = current && typeof current === "object" && !Array.isArray(current) ? (current as Record<string, unknown>) : {}
+  write(key, { ...base, ...patch })
+}
+
 /**
  * useState that survives a reload, for the filters a user picked by hand.
  *

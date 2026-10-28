@@ -6,6 +6,7 @@ import { formatDate, formatSalary } from "../../components/common"
 import { getLang, useT } from "../../i18n"
 import type { AutoRunSchedule, Cycle, Job, JobStats } from "../../types"
 import type { Screen } from "../Sidebar"
+import { rememberJobsTab } from "./Jobs"
 import { CompanyMark, Empty, Icon, Score, Skeletons, ago, shortDate } from "../ui"
 
 function greeting(t: (english: string) => string): string {
@@ -114,12 +115,17 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
   })
   const freshCount = fresh ? `${fresh.jobs.length}${fresh.more ? "+" : ""}` : "—"
 
-  const tiles: Array<{ label: string; value: string | number; note: string; tone: string; screen: Screen }> = [
-    { label: "New", value: freshCount, note: t("on profile, not viewed"), tone: "violet", screen: "jobs" },
-    { label: "Later", value: stats?.later ?? "—", note: t("set aside"), tone: "sky", screen: "jobs" },
+  const tiles: Array<{ label: string; value: string | number; note: string; tone: string; screen: Screen; jobsTab?: "new" | "later" }> = [
+    { label: "New", value: freshCount, note: t("on profile, not viewed"), tone: "violet", screen: "jobs", jobsTab: "new" },
+    { label: "Later", value: stats?.later ?? "—", note: t("set aside"), tone: "sky", screen: "jobs", jobsTab: "later" },
     { label: "Waiting", value: stats?.pipeline.waiting ?? "—", note: t("applied, no interview yet"), tone: "amber", screen: "applied" },
     { label: "Interview", value: stats?.pipeline.interview ?? "—", note: t("in progress"), tone: "green", screen: "applied" },
   ]
+
+  function openJobs(tab: "new" | "later") {
+    rememberJobsTab(tab)
+    onScreen("jobs")
+  }
 
   return (
     <div className="page">
@@ -193,7 +199,8 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
             href={`#${tile.screen}`}
             onClick={(event) => {
               event.preventDefault()
-              onScreen(tile.screen)
+              if (tile.jobsTab) openJobs(tile.jobsTab)
+              else onScreen(tile.screen)
             }}
           >
             <span className="tile-label">{t(tile.label)}</span>
@@ -215,7 +222,7 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
               style={{ marginLeft: "auto", fontSize: 13, fontWeight: 500, textDecoration: "none" }}
               onClick={(event) => {
                 event.preventDefault()
-                onScreen("jobs")
+                openJobs("new")
               }}
             >
               {t("All")} →
@@ -234,7 +241,7 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
                 style={{ textDecoration: "none" }}
                 onClick={(event) => {
                   event.preventDefault()
-                  onScreen("jobs")
+                  openJobs("new")
                 }}
               >
                 <Score job={job} />
