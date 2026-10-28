@@ -146,13 +146,9 @@ export function Jobs() {
       if (explicit) setShowDetail(true)
       const result = await run(() => api.job(job.id))
       if (result) setDetail((prev) => (prev && prev.id !== job.id ? prev : result.job))
-      // Opening a card is reading it, so it stops being "new" — but stays in view until the list reloads.
-      if (explicit && !job.viewed_at) {
-        const marked = await run(() => api.setJobViewed(job.id, true))
-        if (marked) patch(job.id, { viewed_at: marked.viewed_at }, false)
-      }
+      // Opening a card never marks it viewed: flipping through the list is not a decision,
+      // and "viewed" drops the job out of New here and in the current admin.
     },
-    // patch only touches state setters, so it is safe to leave out.
     [run],
   )
 
