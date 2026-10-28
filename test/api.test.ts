@@ -68,6 +68,21 @@ describe("auth", () => {
     expect((await call("/api/jobs", { token: "wrong" })).status).toBe(401)
   })
 
+  it("does not turn a failing database into a 401 on the first master login", async () => {
+    // A fresh install: no users yet, so ADMIN_TOKEN goes through the bootstrap.
+    env = testEnv({ ADMIN_TOKEN: "fresh-admin" })
+    await env.DB.prepare(`DELETE FROM user_profiles`).run()
+    await env.DB.prepare(`DELETE FROM users`).run()
+    const prepare = env.DB.prepare.bind(env.DB)
+    env.DB.prepare = ((sql: string) => {
+      if (sql.startsWith("INSERT INTO users")) throw new Error("D1_ERROR: exceeded D1 row read limit")
+      return prepare(sql)
+    }) as typeof env.DB.prepare
+    const res = await call("/api/jobs", { token: "fresh-admin" })
+    expect(res.status).toBe(503)
+    expect((await call("/api/jobs", { token: "not-the-admin" })).status).toBe(401)
+  })
+
   it("answers unknown paths with a json 404", async () => {
     expect(await call("/api/nope")).toMatchObject({ status: 404, body: { error: "not found" } })
   })

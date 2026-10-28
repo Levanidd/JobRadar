@@ -2,6 +2,7 @@ import { Hono } from "hono"
 
 import { adapters } from "../adapters"
 import { currentUser, masterGuard } from "../auth"
+import { message } from "../errors"
 import { ensureExploreSources, listExploreBoards } from "../explore"
 import { addDiscovered, trackedCompanyKeys } from "../ingest"
 import { blockedCompanyKeysForUser } from "../settings"
@@ -36,8 +37,10 @@ discovery.get("/api/discovered", async (c) => {
 discovery.post("/api/discovered/:key/add", async (c) => {
   try {
     return c.json(await addDiscovered(c.env, c.req.param("key")))
-  } catch {
-    return c.json({ error: "not found" }, 404)
+  } catch (error) {
+    // addDiscovered throws "not found" for an unknown key; anything else is a real failure.
+    if (message(error) === "not found") return c.json({ error: "not found" }, 404)
+    throw error
   }
 })
 

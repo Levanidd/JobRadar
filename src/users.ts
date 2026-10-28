@@ -1,3 +1,4 @@
+import { message } from "./errors"
 import { pick } from "./locale"
 import { DEFAULT_PREFILTER, sanitizeTags } from "./prefilter"
 import {
@@ -93,10 +94,11 @@ export async function bootstrapMaster(env: Bindings, token: string): Promise<Aut
   try {
     const id = await insertMaster(env, "Master", await hashToken(token))
     return { id, name: "Master", role: "master" }
-  } catch {
+  } catch (error) {
+    // A parallel first login may have created the master a moment earlier.
     const raced = await findUserByToken(env, token)
     if (raced) return raced
-    throw new Error("unauthorized")
+    throw error
   }
 }
 
@@ -106,8 +108,11 @@ export async function resolveAuth(env: Bindings, token: string): Promise<AuthUse
   if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) return null
   try {
     return await bootstrapMaster(env, token)
-  } catch {
-    return null
+  } catch (error) {
+    // Only a refused bootstrap means "wrong token". A database that is down or
+    // out of reads must surface as such, not log the person out with a 401.
+    if (message(error) === "unauthorized") return null
+    throw error
   }
 }
 
@@ -142,7 +147,8 @@ export async function createUser(
       .bind(id, JSON.stringify(DEFAULT_PREFILTER.keep), JSON.stringify(DEFAULT_PREFILTER.drop))
       .run()
     return { user: { id, name: clean, role: "user", token } }
-  } catch {
+  } catch (error) {
+    console.error("user create failed", error)
     return { error: pick("Couldn't create the user", "Не удалось создать пользователя") }
   }
 }

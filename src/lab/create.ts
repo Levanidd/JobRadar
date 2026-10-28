@@ -30,7 +30,8 @@ async function nebiusPrices(env: Bindings): Promise<Map<string, [number, number]
     }
     priceCache.set(env.DB, { at: Date.now(), prices })
     return prices
-  } catch {
+  } catch (error) {
+    console.warn("nebius prices unavailable, cost estimate left out", error)
     return null
   }
 }
