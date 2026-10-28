@@ -58,13 +58,33 @@ function WeekBars({ stats }: { stats: JobStats }) {
   )
 }
 
+type Upcoming = { job: Job; title: string; day: string }
+
+/**
+ * Stages come only with the full job, so each job in the interview pile is
+ * opened once. Only rounds dated today or later are kept, soonest first;
+ * past rounds and rounds without a date stay on the job card.
+ */
+async function upcomingStages(jobs: Job[]): Promise<Upcoming[]> {
+  const today = new Date()
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`
+  const full = await Promise.all(jobs.map((job) => api.job(job.id).then((result) => result.job).catch(() => null)))
+  const out: Upcoming[] = []
+  for (const job of full) {
+    for (const stage of job?.stages ?? []) {
+      if (job && stage.happened_on && stage.happened_on >= todayKey) out.push({ job, title: stage.title, day: stage.happened_on })
+    }
+  }
+  return out.sort((a, b) => a.day.localeCompare(b.day))
+}
+
 export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: () => void; onScreen: (screen: Screen) => void }) {
   const t = useT()
   const run = useAction()
   const { me } = useApp()
   const [stats, setStats] = useState<JobStats | null>(null)
   const [fresh, setFresh] = useState<{ jobs: Job[]; more: boolean } | null>(null)
-  const [interviews, setInterviews] = useState<Job[] | null>(null)
+  const [upcoming, setUpcoming] = useState<Upcoming[] | null>(null)
   const [schedule, setSchedule] = useState<AutoRunSchedule | null>(null)
 
   const load = useCallback(async () => {
@@ -75,7 +95,7 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
     ])
     if (totals) setStats(totals)
     if (list) setFresh({ jobs: list.jobs, more: list.has_more })
-    if (active) setInterviews(active.jobs)
+    if (active) setUpcoming(await upcomingStages(active.jobs))
     // The schedule is the master's setting; anyone else simply does not see it.
     try {
       setSchedule(await api.autoRun())
@@ -239,18 +259,18 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
         <div className="col-side">
           <section className="card card-pad section" style={{ background: "var(--green-bg)", borderColor: "var(--green-line)", gap: 10 }}>
             <h2 className="section-title" style={{ color: "var(--green-tx)" }}>
-              {t("Interviews in progress")}
+              {t("Upcoming interviews")}
             </h2>
-            {interviews === null ? (
+            {upcoming === null ? (
               <Skeletons count={2} />
-            ) : interviews.length === 0 ? (
+            ) : upcoming.length === 0 ? (
               <p className="prose" style={{ color: "var(--green-tx)", fontSize: 13 }}>
-                {t("No interviews right now.")}
+                {t("No interviews scheduled.")}
               </p>
             ) : (
-              interviews.slice(0, 5).map((job) => (
+              upcoming.slice(0, 5).map((item) => (
                 <a
-                  key={job.id}
+                  key={`${item.job.id}-${item.day}-${item.title}`}
                   className="row row-center"
                   href="#applied"
                   style={{ background: "var(--card)", textDecoration: "none" }}
@@ -259,15 +279,17 @@ export function Today({ cycle, onRun, onScreen }: { cycle: Cycle | null; onRun: 
                     onScreen("applied")
                   }}
                 >
-                  <CompanyMark name={job.company} />
+                  <CompanyMark name={item.job.company} />
                   <span className="row-main">
                     <span className="row-title" style={{ fontWeight: 600 }}>
-                      {job.title}
+                      {item.title}
                     </span>
-                    <span className="row-sub">{job.company}</span>
+                    <span className="row-sub">
+                      {item.job.company} · {item.job.title}
+                    </span>
                   </span>
-                  <span className="row-side" style={{ marginTop: 0 }}>
-                    {shortDate(job.interviewed_at ?? job.applied_at)}
+                  <span className="row-side" style={{ marginTop: 0, color: "var(--tx)", fontWeight: 600 }}>
+                    {shortDate(item.day)}
                   </span>
                 </a>
               ))

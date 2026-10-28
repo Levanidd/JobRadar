@@ -29,8 +29,8 @@ export const ru: Record<string, string> = {
   "by score, not viewed yet": "по score, ещё не смотрел",
   "Nothing new": "Нового нет",
   "Everything on profile has been looked at.": "Всё на профиле уже просмотрено.",
-  "Interviews in progress": "Собесы сейчас",
-  "No interviews right now.": "Сейчас собесов нет.",
+  "Upcoming interviews": "Ближайшие собесы",
+  "No interviews scheduled.": "Запланированных собесов нет.",
   "{count} weeks": "{count} недель",
   "Week of {date}: {count}": "Неделя с {date}: {count}",
 
