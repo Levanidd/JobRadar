@@ -6,6 +6,7 @@ import { detectUrl } from "../detect"
 import { message } from "../errors"
 import { prefilterAndScore, runSource } from "../ingest"
 import type { AppEnv, SourceRow } from "../types"
+import { readBody, stringField } from "./body"
 
 export const sources = new Hono<AppEnv>()
 
@@ -43,14 +44,15 @@ sources.get("/api/sources", async (c) => {
 })
 
 sources.post("/api/sources", async (c) => {
-  const body = await c.req.json<{
-    kind?: "company" | "query"
-    tier?: "watchlist" | "discovery"
-    label: string
-    provider: string
-    token: string
-    careers_url?: string
-  }>()
+  const raw = await readBody(c)
+  const body = {
+    kind: raw.kind === "company" || raw.kind === "query" ? raw.kind : undefined,
+    tier: raw.tier === "watchlist" || raw.tier === "discovery" ? raw.tier : undefined,
+    label: stringField(raw, "label"),
+    provider: stringField(raw, "provider"),
+    token: stringField(raw, "token"),
+    careers_url: stringField(raw, "careers_url") || undefined,
+  }
   if (!body.label || !body.provider || !body.token) {
     return c.json({ error: "label, provider, token required" }, 400)
   }
@@ -79,7 +81,12 @@ sources.patch("/api/sources/:id", async (c) => {
   const denied = masterGuard(c)
   if (denied) return denied
   const id = Number(c.req.param("id"))
-  const body = await c.req.json<{ enabled?: number; tier?: string; label?: string }>()
+  const raw = await readBody(c)
+  const body = {
+    enabled: raw.enabled === 0 || raw.enabled === 1 ? raw.enabled : undefined,
+    tier: raw.tier === "watchlist" || raw.tier === "discovery" ? raw.tier : undefined,
+    label: stringField(raw, "label") || undefined,
+  }
   const current = await c.env.DB.prepare(`SELECT * FROM sources WHERE id = ?`).bind(id).first<SourceRow>()
   if (!current) return c.json({ error: "not found" }, 404)
   await c.env.DB.prepare(`UPDATE sources SET enabled = ?, tier = ?, label = ? WHERE id = ?`)
@@ -112,15 +119,16 @@ sources.post("/api/sources/:id/run", async (c) => {
 })
 
 sources.post("/api/detect", async (c) => {
-  const body = await c.req.json<{ url: string }>()
-  if (!body.url) return c.json({ error: "url required" }, 400)
-  return c.json(await detectUrl(body.url, c.env))
+  const url = stringField(await readBody(c), "url")
+  if (!url) return c.json({ error: "url required" }, 400)
+  return c.json(await detectUrl(url, c.env))
 })
 
 sources.post("/api/sources/bulk-detect", async (c) => {
-  const body = await c.req.json<{ urls: string[] }>()
+  const raw = (await readBody(c)).urls
+  const urls = Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : []
   const results = []
-  for (const url of body.urls ?? []) {
+  for (const url of urls) {
     try {
       results.push({ url, ...(await detectUrl(url, c.env)) })
     } catch (error) {

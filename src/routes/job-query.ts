@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import { currentUser } from "../auth"
 import { excludeBlockedCompaniesForUser } from "../settings"
+import type { JobStatus } from "../../shared/domain"
 import type { AppEnv } from "../types"
 
 export type Ctx = Context<AppEnv>
@@ -39,7 +40,7 @@ export function jobOrder(c: Ctx): string {
 }
 
 /** These statuses exist only on a user_jobs row, so the list can start there. */
-const ROW_STATUSES = new Set(["notified", "saved", "applied", "interview", "rejected", "ignored", "off_profile"])
+const ROW_STATUSES = new Set<string>(["notified", "saved", "applied", "interview", "rejected", "ignored", "off_profile"] satisfies JobStatus[])
 
 /**
  * True when every matching posting has a user_jobs row. Unscored postings

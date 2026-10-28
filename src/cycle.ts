@@ -1,14 +1,13 @@
 import { message } from "./errors"
 import { notifyNew, pickSources, prefilterAndScore, runSourceStep, type SourcePolicy } from "./ingest"
+import type { CycleKind, CyclePhase, CycleStatus } from "../shared/domain"
 import type { Bindings, SourceRow } from "./types"
 import type { UsageContext } from "./usage"
 
 const SCORE_CHUNK = 40
 const MAX_HOPS = 1000
 
-export type CyclePhase = "sources" | "scoring" | "digest"
-export type CycleStatus = "idle" | "running" | "done" | "error"
-export type CycleKind = "manual" | "auto"
+export type { CycleKind, CyclePhase, CycleStatus } from "../shared/domain"
 
 type Planned = { id: number; label: string }
 

@@ -107,6 +107,33 @@ describe("sources", () => {
     })
   })
 
+  it("answers a body that is not JSON, or has the wrong shape, with 400 rather than 500", async () => {
+    const broken = { method: "POST", body: "{not json" }
+    expect((await call("/api/sources", broken)).status).toBe(400)
+    expect((await call("/api/detect", broken)).status).toBe(400)
+    expect((await call("/api/settings", { method: "PUT", body: "{not json" })).status).toBe(400)
+    const numbers = JSON.stringify({ label: 1, provider: 2, token: 3 })
+    expect((await call("/api/sources", { method: "POST", body: numbers })).status).toBe(400)
+    expect(await call("/api/sources/bulk-detect", { method: "POST", body: JSON.stringify({ urls: "x" }) })).toMatchObject({
+      status: 200,
+      body: { results: [] },
+    })
+  })
+
+  it("ignores a patch value of the wrong type instead of storing it", async () => {
+    await call("/api/sources", {
+      method: "POST",
+      body: JSON.stringify({ label: "Acme", provider: "greenhouse", token: "acme" }),
+    })
+    const [source] = (await call("/api/sources")).body.sources
+    const patched = await call(`/api/sources/${source.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: "yes", tier: "vip", label: "Acme GmbH" }),
+    })
+    expect(patched.status).toBe(200)
+    expect((await call("/api/sources")).body.sources[0]).toMatchObject({ enabled: 1, tier: "watchlist", label: "Acme GmbH" })
+  })
+
   it("hides the manual source from the list", async () => {
     await env.DB.prepare(
       `INSERT INTO sources (kind, tier, label, provider, token, enabled)
