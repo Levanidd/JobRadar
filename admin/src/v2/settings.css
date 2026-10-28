@@ -586,8 +586,9 @@
 }
 
 .set-user {
-  display: flex;
-  flex-wrap: wrap;
+  /* Fixed columns, so the role chip and the token line up from row to row. */
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 120px 210px;
   align-items: center;
   gap: 10px 16px;
   padding: 12px 20px;
@@ -595,7 +596,6 @@
 }
 
 .set-avatar {
-  flex: none;
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -613,7 +613,6 @@
 }
 
 .set-user-name {
-  flex: 1 1 140px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -625,8 +624,11 @@
   font-weight: 600;
 }
 
+.set-user > .chip {
+  justify-self: start;
+}
+
 .set-token {
-  flex: 0 1 200px;
   min-width: 0;
   font-size: 13px;
   color: var(--tx-2);
@@ -641,11 +643,10 @@
 
 /* Actions get a line of their own under the name, so every row lines up the same way. */
 .set-user-actions {
-  flex: 1 0 100%;
+  grid-column: 2 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding-left: 52px;
 }
 
 .btn.set-link-btn {
@@ -750,7 +751,17 @@
     margin-left: 0;
   }
 
+  /* Role and token drop under the name; actions take the full width. */
+  .set-user {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .set-user > .chip,
+  .set-token {
+    grid-column: 2;
+  }
+
   .set-user-actions {
-    padding-left: 0;
+    grid-column: 1 / -1;
   }
 }
