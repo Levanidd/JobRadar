@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 
 import { api, forgetToken, getToken, UnauthorizedError, type JobFilters } from "./api"
 import { AppProvider, type ToastKind } from "./app-context"
+import { hashParts, useHashChange, useInterval } from "./hooks"
 import { Empty } from "./components/common"
 import { BookIcon, BriefcaseIcon, ChartIcon, CheckIcon, FlaskIcon, GearIcon, PersonIcon, StackIcon } from "./components/icons"
 import { RunProgress, type RunState } from "./components/RunProgress"
@@ -39,7 +40,7 @@ const TABS: Array<{
 
 /** `#lab/12` opens run 12 of the lab; the part after the slash belongs to the tab. */
 function tabFromHash(): TabId {
-  const id = window.location.hash.slice(1).split("/")[0]
+  const id = hashParts()[0]
   return TABS.find((item) => item.id === id)?.id ?? "resources"
 }
 
@@ -149,14 +150,10 @@ export default function App() {
   useEffect(() => () => window.clearTimeout(timer.current), [])
 
   useEffect(() => {
-    if (window.location.hash.slice(1).split("/")[0] !== tab) window.history.replaceState(null, "", `#${tab}`)
+    if (hashParts()[0] !== tab) window.history.replaceState(null, "", `#${tab}`)
   }, [tab])
 
-  useEffect(() => {
-    const follow = () => setTab(tabFromHash())
-    window.addEventListener("hashchange", follow)
-    return () => window.removeEventListener("hashchange", follow)
-  }, [])
+  useHashChange(() => setTab(tabFromHash()))
 
   useEffect(() => {
     if (!authorized) return
@@ -171,9 +168,8 @@ export default function App() {
     })()
   }, [authorized, applyCycle, logout])
 
-  useEffect(() => {
-    if (!authorized || !running) return
-    const id = window.setInterval(() => {
+  useInterval(
+    () => {
       void (async () => {
         try {
           const cycle = await api.cycle()
@@ -182,9 +178,10 @@ export default function App() {
           if (error instanceof UnauthorizedError) logout()
         }
       })()
-    }, 1500)
-    return () => window.clearInterval(id)
-  }, [authorized, running, applyCycle, logout])
+    },
+    1500,
+    authorized && running,
+  )
 
   function openCompanyJobs(company: { company_key: string }) {
     setPreset((prev) => ({
