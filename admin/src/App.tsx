@@ -244,6 +244,9 @@ export default function App() {
           <div className="header-actions">
             {me ? <span className="muted">{me.name}</span> : null}
             <LanguageSwitch />
+            <a className="btn btn-ghost btn-sm" href="/v2/">
+              {t("New design")}
+            </a>
             <button
               className="btn btn-primary btn-sm"
               disabled={running}
