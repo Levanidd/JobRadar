@@ -71,6 +71,11 @@ describe("auth", () => {
   it("answers unknown paths with a json 404", async () => {
     expect(await call("/api/nope")).toMatchObject({ status: 404, body: { error: "not found" } })
   })
+
+  it("has no SQL endpoint a personal token could read other people's rows through", async () => {
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })
+    expect((await call("/api/mcp", { method: "POST", body })).status).toBe(404)
+  })
 })
 
 describe("sources", () => {
