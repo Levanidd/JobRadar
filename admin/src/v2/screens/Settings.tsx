@@ -107,7 +107,7 @@ export function Settings(_props: { onScreen: (screen: Screen) => void }) {
   if (subject) return <UserProfile user={subject} onBack={closeSubject} />
 
   return (
-    <div className="page">
+    <div className="page page-wide">
       <header className="set-head-text">
         <h1 className="page-title">{t("Settings")}</h1>
         <div className="muted">{t("Everything about the system as a whole rather than one person's search.")}</div>

@@ -586,12 +586,13 @@
 }
 
 .set-user {
-  /* Fixed columns, so the role chip and the token line up from row to row. */
+  /* Name, role and token stay in fixed tracks. Actions take the rest of the
+     row and wrap only when the window is too narrow for one line. */
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 120px 210px;
+  grid-template-columns: 36px minmax(120px, 200px) max-content minmax(150px, 240px) minmax(0, 1fr);
   align-items: center;
   gap: 10px 16px;
-  padding: 12px 20px;
+  padding: 14px 22px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -641,12 +642,12 @@
   user-select: all;
 }
 
-/* Actions get a line of their own under the name, so every row lines up the same way. */
 .set-user-actions {
-  grid-column: 2 / -1;
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
 }
 
 .btn.set-link-btn {

@@ -368,6 +368,10 @@ button:disabled {
   gap: 22px;
 }
 
+.page-wide {
+  max-width: 1520px;
+}
+
 .page-head {
   display: flex;
   flex-wrap: wrap;
