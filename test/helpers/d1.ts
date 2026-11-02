@@ -109,7 +109,7 @@ export function testEnv(overrides: Partial<Bindings> = {}): TestEnv {
   }
   db.exec("DELETE FROM sources")
   const tokenHash = createHash("sha256").update("test").digest("hex")
-  db.prepare(`INSERT INTO users (id, name, role, token_hash) VALUES (?, 'Мастер', 'master', ?)`).run(
+  db.prepare(`INSERT INTO users (id, name, role, token_hash, auto_run) VALUES (?, 'Мастер', 'master', ?, 1)`).run(
     TEST_USER_ID,
     tokenHash,
   )

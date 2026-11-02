@@ -586,19 +586,20 @@
 }
 
 .set-user {
-  /* Name, role and token stay in fixed tracks. Actions take the rest of the
-     row and wrap only when the window is too narrow for one line. */
+  /* Name, role, token and the auto-run mark stay in fixed tracks.
+     Actions take the rest of the row. */
   display: grid;
-  grid-template-columns: 36px minmax(120px, 200px) max-content minmax(150px, 240px) minmax(0, 1fr);
+  grid-template-columns: 28px minmax(88px, 150px) max-content minmax(110px, 170px) max-content minmax(0, 1fr);
   align-items: center;
-  gap: 10px 16px;
-  padding: 14px 22px;
+  gap: 4px 8px;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--line);
 }
 
 .set-avatar {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
   border-radius: 50%;
   background: var(--sky-bg);
   color: var(--sky-tx);
@@ -623,6 +624,38 @@
 
 .set-user-name b {
   font-weight: 600;
+  font-size: 13px;
+}
+
+.set-user .set-sub,
+.set-user .set-token {
+  font-size: 12px;
+}
+
+.set-user > .chip {
+  font-size: 11px;
+  padding: 1px 7px;
+}
+
+.set-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tx-2);
+  white-space: nowrap;
+}
+
+.set-auto input {
+  margin: 0;
+}
+
+.set-user .btn {
+  height: 26px;
+  padding: 0 8px;
+  gap: 4px;
+  border-radius: 8px;
+  font-size: 12px;
 }
 
 .set-user > .chip {
@@ -658,17 +691,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 10px 14px;
-  padding: 16px 20px 18px;
+  gap: 8px 10px;
+  padding: 10px 12px 12px;
 }
 
 .set-new-user .input {
-  height: 40px;
-  border-radius: 12px;
+  height: 32px;
+  border-radius: 10px;
+  font-size: 13px;
 }
 
 .set-new-user .btn {
-  height: 40px;
+  height: 32px;
 }
 
 /* ── One user's profile ──────────────────────────────── */
@@ -758,7 +792,8 @@
   }
 
   .set-user > .chip,
-  .set-token {
+  .set-token,
+  .set-auto {
     grid-column: 2;
   }
 

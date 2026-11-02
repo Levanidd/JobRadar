@@ -869,6 +869,27 @@ describe("auto-run", () => {
     expect(log.runs[0].finished_at).toBeTruthy()
   })
 
+  it("queues every user marked for the automatic run, and skips the rest", async () => {
+    const created = await call("/api/users", { method: "POST", body: JSON.stringify({ name: "Лена" }) })
+    const lena = created.body.user.id as number
+    expect(created.body.user.auto_run).toBe(false)
+    const marked = await call(`/api/users/${lena}`, { method: "PATCH", body: JSON.stringify({ auto_run: true }) })
+    expect(marked.body.user.auto_run).toBe(true)
+
+    const other = await call("/api/users", { method: "POST", body: JSON.stringify({ name: "Оля" }) })
+    await saveSchedule(env, { enabled: true, times: ["07:00"] })
+    expect(await maybeAutoRun(env, new Date("2026-10-06T05:01:00Z"))).toBe(true)
+
+    const cycle = await one<{ status: string; user_id: number }>(
+      env,
+      `SELECT status, user_id FROM cycles WHERE id = 1`,
+    )
+    // The master is scored first. Lena was queued behind him, so she is the last
+    // user the cycle scored. Olya never opted in, so the run does not end on her.
+    expect(cycle).toMatchObject({ status: "done", user_id: lena })
+    expect(cycle?.user_id).not.toBe(other.body.user.id)
+  })
+
   it("does nothing while switched off", async () => {
     await saveSchedule(env, { enabled: false, times: ["07:00"] })
     expect(await maybeAutoRun(env, new Date("2026-10-06T05:01:00Z"))).toBe(false)

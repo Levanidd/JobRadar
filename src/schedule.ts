@@ -97,10 +97,16 @@ export async function maybeAutoRun(env: Bindings, now = new Date()): Promise<boo
   if (!slot || !(await claimSlot(env, slot))) return false
 
   if ((await loadCycleView(env)).status === "running") return false
-  const master = await env.DB.prepare(`SELECT id FROM users WHERE role = 'master' ORDER BY id LIMIT 1`).first<{
-    id: number
-  }>()
-  await startCycle(env, undefined, master?.id, "auto")
+  const opted = await env.DB.prepare(
+    `SELECT id FROM users WHERE auto_run = 1 ORDER BY CASE WHEN role = 'master' THEN 0 ELSE 1 END, id`,
+  ).all<{ id: number }>()
+  const ids = opted.results.map((row) => row.id)
+  await startCycle(env, undefined, ids[0], "auto")
+  if (ids.length > 1) {
+    await env.DB.prepare(`UPDATE cycles SET score_queue = ? WHERE id = 1 AND status = 'running'`).bind(
+      JSON.stringify(ids.slice(1)),
+    ).run()
+  }
   await walkCycle(env)
   return true
 }

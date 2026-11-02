@@ -26,7 +26,11 @@ export type AuthUser = {
 }
 
 /** Master-only view: `token` is null for the master bootstrapped from ADMIN_TOKEN. */
-export type ManagedUser = AuthUser & { token: string | null }
+export type ManagedUser = AuthUser & {
+  token: string | null
+  /** Scored on the scheduled run, the same way the master is. */
+  auto_run: boolean
+}
 
 export const SCORING_PROVIDERS = ["gemini", "nebius"] as const
 export type ScoringProvider = (typeof SCORING_PROVIDERS)[number]

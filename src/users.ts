@@ -53,7 +53,9 @@ export async function findUserByToken(env: Bindings, token: string): Promise<Aut
 }
 
 async function insertMaster(env: Bindings, name: string, tokenHash: string): Promise<number> {
-  const inserted = await env.DB.prepare(`INSERT INTO users (name, role, token_hash) VALUES (?, 'master', ?)`)
+  const inserted = await env.DB.prepare(
+    `INSERT INTO users (name, role, token_hash, auto_run) VALUES (?, 'master', ?, 1)`,
+  )
     .bind(name, tokenHash)
     .run()
   const id = Number(inserted.meta.last_row_id)
@@ -116,16 +118,22 @@ export async function resolveAuth(env: Bindings, token: string): Promise<AuthUse
   }
 }
 
+type UserRow = AuthUser & { token: string | null; auto_run: number | boolean }
+
+function asUser(row: UserRow): ManagedUser {
+  return { ...row, token: row.token || null, auto_run: row.auto_run === 1 || row.auto_run === true }
+}
+
 export async function listUsers(env: Bindings): Promise<ManagedUser[]> {
-  const rows = await env.DB.prepare(`SELECT id, name, role, token FROM users ORDER BY id`).all<ManagedUser>()
-  return rows.results.map((row) => ({ ...row, token: row.token || null }))
+  const rows = await env.DB.prepare(`SELECT id, name, role, token, auto_run FROM users ORDER BY id`).all<UserRow>()
+  return rows.results.map(asUser)
 }
 
 export async function getUser(env: Bindings, id: number): Promise<ManagedUser | null> {
-  const row = await env.DB.prepare(`SELECT id, name, role, token FROM users WHERE id = ?`)
+  const row = await env.DB.prepare(`SELECT id, name, role, token, auto_run FROM users WHERE id = ?`)
     .bind(id)
-    .first<ManagedUser>()
-  return row ? { ...row, token: row.token || null } : null
+    .first<UserRow>()
+  return row ? asUser(row) : null
 }
 
 export async function createUser(
@@ -146,7 +154,7 @@ export async function createUser(
     )
       .bind(id, JSON.stringify(DEFAULT_PREFILTER.keep), JSON.stringify(DEFAULT_PREFILTER.drop))
       .run()
-    return { user: { id, name: clean, role: "user", token } }
+    return { user: { id, name: clean, role: "user", token, auto_run: false } }
   } catch (error) {
     console.error("user create failed", error)
     return { error: pick("Couldn't create the user", "Не удалось создать пользователя") }
@@ -179,6 +187,17 @@ export async function setUserRole(
   }
   await env.DB.prepare(`UPDATE users SET role = ? WHERE id = ?`).bind(role, id).run()
   return { user: { ...user, role } }
+}
+
+export async function setUserAutoRun(
+  env: Bindings,
+  id: number,
+  autoRun: boolean,
+): Promise<{ user: ManagedUser } | { error: string; status: 404 }> {
+  const user = await getUser(env, id)
+  if (!user) return { error: "not found", status: 404 }
+  await env.DB.prepare(`UPDATE users SET auto_run = ? WHERE id = ?`).bind(autoRun ? 1 : 0, id).run()
+  return { user: { ...user, auto_run: autoRun } }
 }
 
 /**

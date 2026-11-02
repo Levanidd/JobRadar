@@ -45,6 +45,14 @@ export function Users({ onOpen }: { onOpen: (user: ManagedUser) => void }) {
     setUsers((prev) => (prev ? [...prev, result.user] : [result.user]))
   }
 
+  async function toggleAutoRun(user: ManagedUser) {
+    const next = !user.auto_run
+    replace({ ...user, auto_run: next })
+    const result = await run(() => api.updateUser(user.id, { auto_run: next }))
+    if (result) replace(result.user)
+    else replace(user)
+  }
+
   async function toggleRole(user: ManagedUser) {
     const next = user.role === "master" ? "user" : "master"
     const label =
@@ -116,6 +124,15 @@ export function Users({ onOpen }: { onOpen: (user: ManagedUser) => void }) {
                     <span aria-label={t("Token hidden")}>{masked(user.token)}</span>
                   )}
                 </span>
+                <label className="set-auto">
+                  <input
+                    type="checkbox"
+                    checked={user.auto_run}
+                    disabled={busy}
+                    onChange={() => void toggleAutoRun(user)}
+                  />
+                  {t("In auto-run")}
+                </label>
                 <span className="set-user-actions">
                   {user.token !== null ? (
                     <>

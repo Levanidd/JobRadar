@@ -226,14 +226,26 @@ async function finish(env: Bindings, notified: number): Promise<boolean> {
   return false
 }
 
-/** Only the scheduled run's own user is "auto"; anyone who queued up behind it clicked the button. */
+/**
+ * A scheduled run scores every user who opted in. Someone who joined the queue
+ * by pressing Run, and is not opted in, stays a manual trigger.
+ */
 async function cycleUsage(env: Bindings, runId: number | null, userId: number): Promise<UsageContext> {
   const run = runId
     ? await env.DB.prepare(`SELECT kind, user_id FROM cycle_runs WHERE id = ?`)
         .bind(runId)
         .first<{ kind: CycleKind; user_id: number | null }>()
     : null
-  const trigger = run?.kind === "auto" && run.user_id === userId ? "auto" : "manual"
+  let trigger: UsageContext["trigger"] = "manual"
+  if (run?.kind === "auto") {
+    if (run.user_id === userId) trigger = "auto"
+    else {
+      const opted = await env.DB.prepare(`SELECT auto_run FROM users WHERE id = ?`)
+        .bind(userId)
+        .first<{ auto_run: number }>()
+      if (opted?.auto_run === 1) trigger = "auto"
+    }
+  }
   return { kind: "cycle", userId, trigger, runId }
 }
 

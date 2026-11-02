@@ -179,7 +179,10 @@ export const api = {
     return request("/users", { method: "POST", body: JSON.stringify({ name }) })
   },
 
-  updateUser(id: number, body: { name?: string; role?: AuthUser["role"] }): Promise<{ user: ManagedUser }> {
+  updateUser(
+    id: number,
+    body: { name?: string; role?: AuthUser["role"]; auto_run?: boolean },
+  ): Promise<{ user: ManagedUser }> {
     return request(`/users/${id}`, { method: "PATCH", body: JSON.stringify(body) })
   },
 

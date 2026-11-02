@@ -10,6 +10,7 @@ import {
   listUsers,
   loadUserProfile,
   resetUserToken,
+  setUserAutoRun,
   setUserName,
   setUserRole,
 } from "../users"
@@ -41,9 +42,14 @@ users.patch("/api/users/:id", async (c) => {
   const denied = masterGuard(c)
   if (denied) return denied
   const id = Number(c.req.param("id"))
-  const body = await c.req.json<{ name?: string; role?: UserRole }>().catch(() => ({}) as { name?: string; role?: UserRole })
-  if (body.name === undefined && body.role === undefined) {
+  const body = await c.req
+    .json<{ name?: string; role?: UserRole; auto_run?: boolean }>()
+    .catch(() => ({}) as { name?: string; role?: UserRole; auto_run?: boolean })
+  if (body.name === undefined && body.role === undefined && body.auto_run === undefined) {
     return c.json({ error: "nothing to update" }, 400)
+  }
+  if (body.auto_run !== undefined && typeof body.auto_run !== "boolean") {
+    return c.json({ error: "bad auto_run" }, 400)
   }
   if (body.role && body.role !== "master" && body.role !== "user") {
     return c.json({ error: "bad role" }, 400)
@@ -61,6 +67,11 @@ users.patch("/api/users/:id", async (c) => {
     const promoted = await setUserRole(c.env, id, body.role)
     if ("error" in promoted) return c.json({ error: promoted.error }, promoted.status)
     user = promoted.user
+  }
+  if (typeof body.auto_run === "boolean") {
+    const marked = await setUserAutoRun(c.env, id, body.auto_run)
+    if ("error" in marked) return c.json({ error: marked.error }, marked.status)
+    user = marked.user
   }
   return c.json({ user })
 })

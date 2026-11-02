@@ -56,6 +56,7 @@ export const ru: Record<string, string> = {
   "Hidden": "Скрытая",
   "Hide": "Скрыть",
   "Himalayas, Arbeitnow, Remote OK, and the rest are already in the list. Getro and Consider show up as ready once you add a board URL in Sources.": "Himalayas, Arbeitnow, Remote OK и остальные уже в списке. Getro и Consider появятся как рабочие, когда добавите URL доски в Источники.",
+  "In auto-run": "В автопрогоне",
   "In progress": "В работе",
   "Interviews": "Интервью",
   "Issue a token": "Выдать токен",
