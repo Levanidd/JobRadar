@@ -245,6 +245,17 @@ describe("jobs", () => {
     expect((await call("/api/jobs?later=yes")).body.jobs).toHaveLength(0)
   })
 
+  it("drops a later job from that list once it is applied to", async () => {
+    const id = await seedJob()
+    await call(`/api/jobs/${id}`, { method: "PATCH", body: JSON.stringify({ later: true }) })
+    expect((await call("/api/jobs?later=yes")).body.jobs).toHaveLength(1)
+
+    const applied = await call(`/api/jobs/${id}`, { method: "PATCH", body: JSON.stringify({ status: "applied" }) })
+    expect(applied.body.later_at).toBeNull()
+    expect((await call("/api/jobs?later=yes")).body.jobs).toHaveLength(0)
+    expect((await call("/api/stats")).body.later).toBe(0)
+  })
+
   it("filters by whether an application was sent, rejections included", async () => {
     const id = await seedJob()
     expect((await call("/api/jobs?applied=no")).body.jobs).toHaveLength(1)
@@ -606,7 +617,7 @@ describe("stats", () => {
       found: 3,
       open: 3,
       viewed: 3,
-      later: 1,
+      later: 0,
       applied: 3,
       pipeline: { waiting: 1, interview: 1, rejected: 1 },
     })

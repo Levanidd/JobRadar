@@ -151,7 +151,7 @@ stats.get("/api/stats", async (c) => {
          SUM(CASE WHEN ${found} THEN 1 ELSE 0 END) AS found,
          SUM(CASE WHEN ${found} AND j.closed_at IS NULL THEN 1 ELSE 0 END) AS open,
          SUM(CASE WHEN ${saw} THEN 1 ELSE 0 END) AS viewed,
-         SUM(CASE WHEN ${acted("later_at")} THEN 1 ELSE 0 END) AS later,
+         SUM(CASE WHEN ${acted("later_at")} AND uj.applied_at IS NULL AND COALESCE(uj.status, 'new') NOT IN ('applied', 'interview', 'rejected') THEN 1 ELSE 0 END) AS later,
          SUM(CASE WHEN ${acted("applied_at")} THEN 1 ELSE 0 END) AS applied
        ${join}
        WHERE ${where}`,

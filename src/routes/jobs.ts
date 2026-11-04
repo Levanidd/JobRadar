@@ -392,6 +392,9 @@ jobs.patch("/api/jobs/:id", async (c) => {
     if (body.status === "interview") {
       sets.push("interviewed_at = COALESCE(interviewed_at, datetime('now'))")
     }
+    if (body.status === "applied" || body.status === "interview" || body.status === "rejected") {
+      sets.push("later_at = NULL")
+    }
   }
   if (body.notes !== undefined) {
     sets.push("notes = ?")

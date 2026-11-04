@@ -146,7 +146,13 @@ export async function jobFilters(c: Ctx, withCompanies: boolean, anchored = fals
   if (viewed === "no") clauses.push("uj.viewed_at IS NULL")
 
   const later = c.req.query("later")
-  if (later === "yes") clauses.push("uj.later_at IS NOT NULL")
+  // Later is a pile of jobs not yet applied to. Applying, interviewing or a
+  // rejection takes the row off this list even if the mark was left behind.
+  if (later === "yes") {
+    clauses.push("uj.later_at IS NOT NULL")
+    clauses.push("uj.applied_at IS NULL")
+    clauses.push(`${statusExpr} NOT IN ('applied', 'interview', 'rejected')`)
+  }
   if (later === "no") clauses.push("uj.later_at IS NULL")
 
   // A rejection keeps applied_at, so the applied list still covers the ones that

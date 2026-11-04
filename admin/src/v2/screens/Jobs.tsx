@@ -105,7 +105,7 @@ function pinnedFilters(prefs: Prefs, pinned: Pinned): JobFilters {
 function fitsTab(job: Job, tab: Tab): boolean {
   if (job.status === "ignored") return false
   if (tab === "new") return !job.viewed_at && !job.later_at && !inPipeline(job)
-  if (tab === "later") return Boolean(job.later_at)
+  if (tab === "later") return Boolean(job.later_at) && !inPipeline(job)
   if (tab === "hidden") return Boolean(job.viewed_at)
   return true
 }
