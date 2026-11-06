@@ -406,6 +406,9 @@ jobs.patch("/api/jobs/:id", async (c) => {
   if (typeof body.later === "boolean") {
     sets.push(body.later ? "later_at = COALESCE(later_at, datetime('now'))" : "later_at = NULL")
   }
+  // Hide means the job is no longer set aside. This assignment is last so it
+  // wins when the same request also sends later: true.
+  if (body.viewed === true) sets.push("later_at = NULL")
   if (cvUrl !== undefined) {
     sets.push("cv_url = ?")
     binds.push(cvUrl)

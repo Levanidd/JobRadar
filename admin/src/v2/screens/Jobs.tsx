@@ -105,7 +105,7 @@ function pinnedFilters(prefs: Prefs, pinned: Pinned): JobFilters {
 function fitsTab(job: Job, tab: Tab): boolean {
   if (job.status === "ignored") return false
   if (tab === "new") return !job.viewed_at && !job.later_at && !inPipeline(job)
-  if (tab === "later") return Boolean(job.later_at) && !inPipeline(job)
+  if (tab === "later") return Boolean(job.later_at) && !job.viewed_at && !inPipeline(job)
   if (tab === "hidden") return Boolean(job.viewed_at)
   return true
 }
@@ -246,7 +246,7 @@ export function Jobs({ preset }: { preset: JobsPreset | null }) {
 
   async function toggleViewed(job: Job) {
     const result = await run(() => api.setJobViewed(job.id, !job.viewed_at))
-    if (result) patch(job.id, { viewed_at: result.viewed_at })
+    if (result) patch(job.id, { viewed_at: result.viewed_at, later_at: result.later_at })
   }
 
   async function rescore(job: Job) {

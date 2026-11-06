@@ -256,6 +256,17 @@ describe("jobs", () => {
     expect((await call("/api/stats")).body.later).toBe(0)
   })
 
+  it("drops a later job from that list once it is hidden", async () => {
+    const id = await seedJob()
+    await call(`/api/jobs/${id}`, { method: "PATCH", body: JSON.stringify({ later: true }) })
+    const hidden = await call(`/api/jobs/${id}`, { method: "PATCH", body: JSON.stringify({ viewed: true }) })
+    expect(hidden.body.viewed_at).toBeTruthy()
+    expect(hidden.body.later_at).toBeNull()
+    expect((await call("/api/jobs?later=yes")).body.jobs).toHaveLength(0)
+    expect((await call("/api/jobs?viewed=yes")).body.jobs).toHaveLength(1)
+    expect((await call("/api/stats")).body.later).toBe(0)
+  })
+
   it("filters by whether an application was sent, rejections included", async () => {
     const id = await seedJob()
     expect((await call("/api/jobs?applied=no")).body.jobs).toHaveLength(1)
