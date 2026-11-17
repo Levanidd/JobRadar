@@ -2,8 +2,18 @@ import { fetchWorkdayLocations, WORKDAY_PLACEHOLDER } from "../adapters/workday"
 import { boardRank } from "../boards"
 import { companyKey, companyMatchKey, companiesRelated, dedupKey, domainsConflict, employerDomain, jobHash, roleKey, titleKey } from "../company-key"
 
-/** Never stored. Aggregators keep reposting these; the career-site source is already gone. */
-const DROPPED_COMPANIES = new Set(["bjak", "bjakcareer"])
+/**
+ * Never stored. Aggregators keep reposting these; the career-site sources are
+ * already gone. "Doit"/"Doitintl" is the Arbeitnow spam board. "DoiT" and
+ * "DoiT International" are a different employer and stay.
+ */
+const DROPPED_COMPANIES = new Set(["bjak", "bjakcareer", "doitintl"])
+
+function droppedCompany(name: string): boolean {
+  const key = companyKey(name)
+  if (DROPPED_COMPANIES.has(key)) return true
+  return key === "doit" && name.trim() !== "DoiT"
+}
 import { actionRank, blankPlaceKey } from "../dedup-group"
 import { isUnlocated, locationKey, parsePlaces, placeCount, placesMatch } from "../places"
 import { chunk, placeholders, runBatch, selectIn } from "../db"
@@ -121,7 +131,7 @@ export async function upsertJobs(
   jobs: RawJob[],
   watched: Set<string>,
 ): Promise<number> {
-  const kept = jobs.filter((job) => !DROPPED_COMPANIES.has(companyKey(job.company ?? source.label)))
+  const kept = jobs.filter((job) => !droppedCompany(job.company ?? source.label))
   if (kept.length === 0) return 0
 
   const prepared = await Promise.all(
