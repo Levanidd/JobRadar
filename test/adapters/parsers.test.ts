@@ -20,6 +20,7 @@ import { parseAdzuna } from "../../src/adapters/adzuna"
 import { amazonCategorySlug, amazonToken, parseAmazon } from "../../src/adapters/amazon"
 import { readWorkdayDescription, workdayDetailUrl } from "../../src/adapters/workday"
 import { parseRemote, readRemoteDescription, remoteDetailUrl } from "../../src/adapters/remote"
+import { softgardenWidgetCandidates } from "../../src/adapters/softgarden"
 import { parseZalandoPage, readZalandoDescription, zalandoDetailUrl } from "../../src/adapters/zalando"
 import { bodyComesLater } from "../../src/adapters/details"
 import { getroBoard } from "../../src/adapters/getro"
@@ -742,5 +743,26 @@ describe("remote", () => {
     expect(bodyComesLater(`https://apply.remote.com/jobs/${id}`)).toBe(true)
     expect(detectToken(new URL("https://apply.remote.com/"))).toEqual({ provider: "remote", token: "remote" })
     expect(detectToken(new URL("https://remote.com/openings"))).toEqual({ provider: "remote", token: "remote" })
+  })
+})
+
+describe("softgarden", () => {
+  const job = "https://lynxbroker-jobs.softgarden.io/job/68646438/Senior-Product-Manager?src=LinkedIn&l=en"
+
+  it("tries the posting language before German when the path names none", () => {
+    expect(softgardenWidgetCandidates(job)).toEqual([
+      "https://lynxbroker-jobs.softgarden.io/en/widgets/jobs",
+      "https://lynxbroker-jobs.softgarden.io/de/widgets/jobs",
+    ])
+  })
+
+  it("keeps an explicit widget and a language already in the path", () => {
+    expect(softgardenWidgetCandidates("https://renk-group.softgarden.io/de/widgets/jobs")).toEqual([
+      "https://renk-group.softgarden.io/de/widgets/jobs",
+    ])
+    expect(softgardenWidgetCandidates("https://renk-group.softgarden.io/de/jobs/1")).toEqual([
+      "https://renk-group.softgarden.io/de/widgets/jobs",
+    ])
+    expect(softgardenWidgetCandidates("https://example.com/job/1")).toEqual([])
   })
 })
