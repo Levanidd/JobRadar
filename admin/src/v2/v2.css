@@ -1026,6 +1026,15 @@ button:disabled {
   color: var(--tx-2);
 }
 
+/* A chip in Claude's comment can be a few words long: it wraps inside the column
+   instead of running off to the right. */
+.ai-msg-body .chip,
+.panel-ai .actions .chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .ai-qa {
   display: flex;
   flex-direction: column;
