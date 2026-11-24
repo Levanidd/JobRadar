@@ -21,6 +21,7 @@ import { amazonCategorySlug, amazonToken, parseAmazon } from "../../src/adapters
 import { readWorkdayDescription, workdayDetailUrl } from "../../src/adapters/workday"
 import { parseRemote, readRemoteDescription, remoteDetailUrl } from "../../src/adapters/remote"
 import { softgardenWidgetCandidates } from "../../src/adapters/softgarden"
+import { parseDeelListing, readDeelDescription, deelDetailUrl } from "../../src/adapters/deel"
 import { parseZalandoPage, readZalandoDescription, zalandoDetailUrl } from "../../src/adapters/zalando"
 import { bodyComesLater } from "../../src/adapters/details"
 import { getroBoard } from "../../src/adapters/getro"
@@ -764,5 +765,60 @@ describe("softgarden", () => {
       "https://renk-group.softgarden.io/de/widgets/jobs",
     ])
     expect(softgardenWidgetCandidates("https://example.com/job/1")).toEqual([])
+  })
+})
+
+describe("deel", () => {
+  const id = "e188c0d9-7edb-44eb-867e-9b47d6a5d6f9"
+  const listing = {
+    id: 0,
+    attributes: {
+      ashby_id: id,
+      title: "Staff Product Manager, FinTech",
+      location_name: "United Kingdom",
+      all_locations: ["United Kingdom", "Germany"],
+      is_listed: true,
+      ashby_published_date: "2026-11-23T18:36:01.373Z",
+      compensation_tier_summary: "$$96,000 - $180,000 USD",
+      full_job_description: "",
+    },
+  }
+  const hidden = {
+    id: 0,
+    attributes: { ashby_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", title: "Hidden", is_listed: false },
+  }
+
+  it("reads the careers listing embedded in the page", () => {
+    const escaped = JSON.stringify(JSON.stringify([listing, hidden])).slice(1, -1)
+    const html = `career-job-listing\\",\\"jobs\\":${escaped},\\"jobsCount\\":2`
+    expect(parseDeelListing(html)).toEqual([
+      {
+        externalId: id,
+        title: "Staff Product Manager, FinTech",
+        company: "Deel",
+        location: "United Kingdom; Germany",
+        url: `https://www.deel.com/careers/job/${id}/`,
+        postedAt: "2026-11-23T18:36:01.373Z",
+        salary: { min: 96000, max: 180000, currency: "USD" },
+      },
+    ])
+  })
+
+  it("reads the posting body from the flight and recognises both hosts", () => {
+    const flight = `9:{"full_job_description":"$5b"}\n5b:T10,<p>Own <strong>payments</strong>.</p>4e:["$"]\n`
+    const html = `<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>`
+    expect(readDeelDescription(html)).toBe("Own payments .")
+    expect(deelDetailUrl(`https://www.deel.com/careers/job/${id}/?source=linkedin`)).toBe(
+      `https://www.deel.com/careers/job/${id}/`,
+    )
+    expect(bodyComesLater(`https://www.deel.com/careers/job/${id}/`)).toBe(true)
+    expect(detectToken(new URL(`https://www.deel.com/careers/job/${id}/?source=linkedin`))).toEqual({
+      provider: "deel",
+      token: "deel",
+    })
+    expect(detectToken(new URL("https://jobs.deel.com/deel/job-details/" + id + "/application"))).toEqual({
+      provider: "deel",
+      token: "deel",
+    })
   })
 })

@@ -29,6 +29,7 @@ const ATS_PROVIDERS = new Set([
   "amazon",
   "ibm",
   "dassault",
+  "deel",
 ])
 
 /**

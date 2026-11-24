@@ -15,6 +15,7 @@ import { comeet } from "./comeet"
 import { consider } from "./consider"
 import { csod } from "./csod"
 import { dassault } from "./dassault"
+import { deel } from "./deel"
 import { deutschebahn } from "./deutschebahn"
 import { eightfold } from "./eightfold"
 import { flowxtra } from "./flowxtra"
@@ -108,6 +109,7 @@ export const adapters: Adapter[] = [
   tkms,
   ibm,
   dassault,
+  deel,
   zalando,
   remote,
   arbeitsagentur,

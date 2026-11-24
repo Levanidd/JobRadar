@@ -1,3 +1,4 @@
+import { fetchDeelDescription, deelDetailUrl } from "./deel"
 import { fetchRemoteDescription, remoteDetailUrl } from "./remote"
 import { fetchWorkdayDescription, workdayDetailUrl } from "./workday"
 import { fetchZalandoDescription, zalandoDetailUrl } from "./zalando"
@@ -10,6 +11,7 @@ const LATE_BODY = [
   { matches: workdayDetailUrl, fetch: fetchWorkdayDescription },
   { matches: zalandoDetailUrl, fetch: fetchZalandoDescription },
   { matches: remoteDetailUrl, fetch: fetchRemoteDescription },
+  { matches: deelDetailUrl, fetch: fetchDeelDescription },
 ]
 
 export function bodyComesLater(jobUrl: string): boolean {
