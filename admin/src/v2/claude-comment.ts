@@ -39,11 +39,26 @@ function parseHeader(inside: string): Pick<CommentMessage, "label" | "detail" | 
   return { label, detail: rest.join(",").trim(), date }
 }
 
+// A chip is a short tag. Longer pieces of a ` | ` line are sentences and read as paragraphs.
+const CHIP_MAX = 60
+
+function segmentsOf(line: string): string[] {
+  return line.split(" | ").map((item) => item.trim()).filter(Boolean)
+}
+
 function chipsOf(line: string): string[] | null {
   // `Вердикт: подаваться | Fit: средний | База: Mobile`, or a lone `Вердикт: мимо`.
-  if (line.includes(" | ")) return line.split(" | ").map((item) => item.trim()).filter(Boolean)
+  if (line.includes(" | ")) {
+    const items = segmentsOf(line)
+    return items.every((item) => item.length <= CHIP_MAX) ? items : null
+  }
   if (/^Вердикт:\s/i.test(line) && line.length <= 80) return [line.trim()]
   return null
+}
+
+function textPart(line: string): CommentPart {
+  const field = line.match(FIELD)
+  return field ? { kind: "field", key: field[1], text: field[2] } : { kind: "text", text: line }
 }
 
 function parseBody(lines: string[]): CommentPart[] {
@@ -87,12 +102,8 @@ function parseBody(lines: string[]): CommentPart[] {
       parts.push({ kind: "chips", items: chips })
       continue
     }
-    const field = line.match(FIELD)
-    if (field) {
-      parts.push({ kind: "field", key: field[1], text: field[2] })
-      continue
-    }
-    parts.push({ kind: "text", text: line })
+    // `26.10: Fit средний, ... | 26.10: CV собран ...`: long pieces, one paragraph each.
+    for (const segment of line.includes(" | ") ? segmentsOf(line) : [line]) parts.push(textPart(segment))
   }
   return parts
 }

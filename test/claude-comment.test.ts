@@ -84,6 +84,21 @@ describe("parseClaudeComment", () => {
     expect(messages[1]).toMatchObject({ date: null, summary: "Fit: СРЕДНИЙ. Плюсы: Berlin." })
   })
 
+  it("reads long ` | ` pieces as paragraphs, not chips", () => {
+    const messages = parseClaudeComment(
+      "[2026-10-26] 26.10: Fit средний+. Самый реалистичный вариант в IDnow после отказа по Trust Platform Core | 26.10: CV собран от API-версии, ссылка в cv_url.",
+    )
+    expect(messages[0].parts).toEqual([
+      { kind: "text", text: "26.10: Fit средний+. Самый реалистичный вариант в IDnow после отказа по Trust Platform Core" },
+      { kind: "text", text: "26.10: CV собран от API-версии, ссылка в cv_url." },
+    ])
+  })
+
+  it("keeps short ` | ` pieces as chips", () => {
+    const messages = parseClaudeComment("[auto-review 2026-11-04] Вердикт: пограничная | Fit: средний")
+    expect(messages[0].parts).toEqual([{ kind: "chips", items: ["Вердикт: пограничная", "Fit: средний"] }])
+  })
+
   it("shows a repeated message once", () => {
     const repeated = "[auto-review 2026-10-27] Вердикт: мимо\nПричина: репост."
     expect(parseClaudeComment(`${repeated}\n\n${repeated}`)).toHaveLength(1)
